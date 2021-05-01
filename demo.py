@@ -9,7 +9,7 @@ a = Server.Server(('', 80), timeout = 30)
 print(f'You can visit this server at {a.addr}')
 
 
-def hello_world(request):
+def hello_world(request: Structs.Request):
     s = f'hello world! from {request.addr}'
     return s
 
