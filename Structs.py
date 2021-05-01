@@ -4,7 +4,8 @@ from re import Pattern, compile
 
 
 class RAWRequest:
-    def __init__(self, addr: tuple, method: str, url: str, version: str, param: dict, content: bytes, conn, **ext_data):
+    def __init__(self, addr: tuple, method: str, url: str, version: str, param: dict, content: bytes,
+                 conn: socket.socket = None, **ext_data):
         self.addr = addr
         self.method = method
         self.url = url
@@ -17,7 +18,7 @@ class RAWRequest:
 
 class Request(RAWRequest):
     def __init__(self, header: list, content: bytes, **ext_data):
-        super().__init__(**ext_data, content = content, conn = None)
+        super().__init__(**ext_data, content = content)
         self.headers = header
         self.content = content
         self.extra_data = ext_data
@@ -44,18 +45,20 @@ class Handler:
 
 
 class Interface:
-    def __init__(self, func):
+    def __init__(self, func, req_type: type):
         self._function = func
+        self.req_type = req_type
 
     def __enter__(self):
         return self
 
-    def process(self, request: RAWRequest):
+    def process(self, request: self.req_type):
         return self._function(request)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type or exc_val or exc_tb:
             print(exc_type, exc_val, exc_tb)
+
         return True
 
 
