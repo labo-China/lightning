@@ -1,12 +1,14 @@
-def recv_request_line(conn):
-    from urllib.parse import unquote
+import socket
+
+
+def recv_request_line(conn: socket.socket):
     stack = b''
     while b'\r\n' not in stack:
         current_recv = conn.recv(1)
         stack += current_recv
-        if len(current_recv) < buffer:
+        if not current_recv:
             break
-    return unquote(stack.split(b'\r\n', 1)[0].decode())
+    return stack.split(b'\r\n', 1)[0]
 
 
 def recv_all(conn, buffer: int = 1024):
@@ -19,16 +21,12 @@ def recv_all(conn, buffer: int = 1024):
     return content
 
 
-def parse_request_line(content: bytes) -> dict:
+def parse_request_line(line: bytes) -> dict:
     from urllib.parse import unquote
-    line, extend = content.split(b'\r\n', 1)
-    method, url, ver = line.decode().split(maxsplit = 2)
-    path, param = url.split('?', 1) if '?' in url else url, ''
-    params = {}
-    for p in param.split('&'):
-        x = p.split('=')
-        params.update({x[0]: x[1]} if x[0] else {})
-    return {'method': method, 'url': unquote(path), 'param': params, 'version': ver, 'content': extend}
+    method, url, ver = unquote(line.decode()).split(maxsplit = 2)
+    path, param = url.split('?', 1) if '?' in url else [url, '']
+    params = dict([tuple(p.split('=')) for p in param.split('&') if '=' in p])
+    return {'method': method, 'url': unquote(path), 'param': params, 'version': ver}
 
 
 def parse_content(content: bytes) -> dict:
