@@ -14,7 +14,7 @@ def hello_world(request):
     return s
 
 
-f = Structs.StringInterface(hello_world)
+f = Structs.Interface(hello_world, Structs.Request)
 # 访问 127.0.0.1/test 来激活这个Interface
-a.bind((f, '/test'))
+a.bind('/test', f)
 a.run()
