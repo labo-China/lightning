@@ -2,7 +2,7 @@ import re
 
 import Structs
 import Utility
-from Structs import Request, Response, Handler, BaseInterface, BytesInterface
+from Structs import Request, Response, Handler, Interface
 import Interfaces
 from typing import Tuple, List, Union
 import socket
@@ -15,12 +15,12 @@ from re import Pattern, compile
 
 class Server:
     def __init__(self, server_addr: Tuple[str, int], recv_buffer_size: int = 1024, listen_limit: int = 10,
-                 timeout: int = 60, default: Handler = Interfaces.DefaultInterface(),
+                 timeout: int = 60, default: Handler = Interfaces.DefaultInterface,
                  conn_famliy: socket.AddressFamily = socket.AF_INET):
         self.is_running = False
         self.default = default
         self.recv_buffer_size = recv_buffer_size
-        self._urlmap = {}
+        self._map: List[Tuple[Pattern, Interface]] = []
         self._request_pool = []
         self.timeout = timeout
         self.addr = server_addr
@@ -36,13 +36,9 @@ class Server:
         request = Request(addr = address, **Utility.parse_request(raw_content))
         return request
 
-    def bind(self, *g: Tuple[Handler, str]):
-        for x in g:
-            self._urlmap.update({x[1]: x[0]})
-
-    def bind_(self, pattern: Union[Pattern, str], interface: Structs.Interface, req_class: type = Structs.Request):
+    def bind(self, pattern: Union[Pattern, str], interface: Structs.Interface):
         pattern = pattern if isinstance(pattern, Pattern) else re.compile(f'^{pattern}$')
-        self.__map.append((pattern, interface, req_class))
+        self._map.append((pattern, interface))
 
     def run(self, block: bool = True):
         self.is_running = True
@@ -66,30 +62,24 @@ class Server:
             t.start()
         print('Request listening stopped.')
 
-    def _handle_request_(self, connection, address):
+    def _handle_request(self, connection, address):
         request_line = Utility.parse_request_line(Utility.recv_request_line(connection))
-        for i in self.__map:
-            if i[0].match(request_line['url']):
-                interface, req_class = i[1:]
-                break
-        else:
-            interface = self.default
-            req_class = Structs.Request
-
-        if req_class == Structs.RAWRequest:
+        interface = [i for i in self._map if i[0].match(request_line['url'])]
+        interface = interface[0] if len(interface) else self.default
+        if interface == Structs.RAWRequest:
             request = RawRequest(addr = address, conn = connection, **request_line)
         else:
             recv_content = Utility.recv_all(connection)
             content = Utility.parse_content(recv_content)
             request = Request(**request_line, **content)
-        with interface[2] as i:
+        with interface[1] as i:
             ret = i.process(request)
             if ret:
                 connection.sendall(ret if type(ret) is bytes else bytes(repr(ret), 'utf-8'))
             connection.close()
         print(f'Request {address} processed.')
 
-    def _handle_request(self, connection, address):
+    def _handle_request_(self, connection, address):
         recv_content = b''
         content_length = self.recv_buffer_size
         while content_length == self.recv_buffer_size:
