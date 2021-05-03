@@ -5,13 +5,14 @@ import time
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
 
+
 a = Server.Server(('', 80), timeout = 30)
 print(f'You can visit this server at {a.addr}')
 
 
-def hello_world(request: Structs.Request):
+def hello_world(request: Structs.Request) -> Structs.Response:
     s = f'hello world! from {request.addr}'
-    return s
+    return Structs.Response(content = s)
 
 
 f = Structs.Interface(hello_world, Structs.Request)
