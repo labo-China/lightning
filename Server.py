@@ -1,5 +1,5 @@
 import Utility
-from Structs import Request, Interface
+from Structs import Request, Interface, RAWRequest, Processer, RAWResponse
 import Interfaces
 from typing import Tuple, List, Union
 import socket
@@ -11,13 +11,14 @@ from re import Pattern, compile
 
 class Server:
     def __init__(self, server_addr: Tuple[str, int], recv_buffer_size: int = 1024, listen_limit: int = 10,
-                 timeout: int = 60, default: Handler = Interfaces.DefaultInterface,
+                 timeout: int = 60, default: Interface = Interfaces.DefaultInterface, thread_limit: int = 10,
                  conn_famliy: socket.AddressFamily = socket.AF_INET):
         self.is_running = False
         self.default = default
         self.recv_buffer_size = recv_buffer_size
         self._map: List[Tuple[Pattern, Interface]] = []
         self._request_pool = []
+        self.thread_limit = thread_limit
         self.timeout = timeout
         self.addr = server_addr
 
@@ -25,12 +26,6 @@ class Server:
         self._sock.settimeout(timeout)
         self._sock.bind(server_addr)
         self._sock.listen(listen_limit)
-
-    @staticmethod
-    def parser(raw_content: bytes, address: tuple) -> Request:
-        import Utility
-        request = Request(addr = address, **Utility.parse_request(raw_content))
-        return request
 
     def bind(self, pattern: Union[Pattern, str], interface: Interface):
         pattern = pattern if isinstance(pattern, Pattern) else compile(f'^{pattern}$')
@@ -62,7 +57,7 @@ class Server:
         request_line = Utility.parse_request_line(Utility.recv_request_line(connection))
         interface = [i[1] for i in self._map if i[0].match(request_line['url'])]
         interface = interface[0] if len(interface) else self.default
-        if interface == Structs.RAWRequest:
+        if interface == RAWRequest:
             request = RawRequest(addr = address, conn = connection, **request_line)
         else:
             recv_content = Utility.recv_all(connection)
@@ -70,10 +65,10 @@ class Server:
             request = Request(addr = address, **request_line, **content)
         with interface as i:
             i.process(request)
-        if i.msg:
-            connection.sendall(i.msg if type(i.msg) is bytes else bytes(str(i.msg), 'utf-8'))
+        if i.resp.generate():
+            connection.sendall(i.resp.generate())
             connection.close()
-            i.msg = b''
+            i.resp = b''
         print(f'Request {address} processed.')
 
     def interrupt(self):
