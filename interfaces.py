@@ -3,6 +3,7 @@ from os import listdir
 import time
 from urllib.parse import quote
 from structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
+from mimetypes import guess_type
 
 
 class File(MethodInterface):
@@ -38,17 +39,19 @@ class File(MethodInterface):
                 'Content-Range': f'bytes {start}-{end}/{self.filesize}'}).generate())
             request.conn.sendfile(file, start, left)
         else:
+            mime = guess_type(self.filename)[0] or 'application/octet-stream'
+            header = {'Content-Disposition':
+                      'attachment;filename=' + self.filename} if request.keyword.get('view') else {}
             request.conn.sendall(Response(header = {'Content-Length': str(self.filesize),
-                                                    'Content-Type': 'application/octet-stream',
-                                                    'Content-Disposition': 'attachment;filename=' + self.filename,
-                                                    'Accept-Ranges': 'bytes'}).generate())
+                                                    'Content-Type': mime,
+                                                    'Accept-Ranges': 'bytes'} | header).generate())
             request.conn.sendfile(file)
         request.conn.close()
 
 
 class Folder(Node):
     def __init__(self, path: str, file_only: bool = False, lazy: bool = True, update_time: int = 60):
-        self.path = path
+        self.path = path + '/' if not path.endswith('/') else path
         self.dirname = basename(path.removesuffix('/'))
         self.file_only = file_only
         self.lazy = lazy
@@ -72,14 +75,13 @@ class Folder(Node):
         m = {}
         try:
             for name in listdir(self.path):
-                abs_path = self.path + '/' + name
+                abs_path = self.path + name
                 if isfile(abs_path):
                     m.update({'/' + name: File(abs_path)})
                 elif isdir(abs_path) and not self.file_only:
                     m.update({'/' + name: Folder(abs_path, file_only = self.file_only, lazy = self.lazy)})
         except PermissionError:
             return {}
-
         return m
 
     def get_map(self):
