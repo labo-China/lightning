@@ -1,15 +1,18 @@
-import http
 import socket
+from urllib.parse import unquote
 
 
-def recv_request_line(conn: socket.socket):
-    stack = b''
-    while b'\r\n' not in stack:
+def recv_request_head(conn: socket.socket):
+    timeout = conn.gettimeout()
+    conn.settimeout(0.1)
+    stack = conn.recv(1)
+    conn.settimeout(timeout)
+    while b'\r\n\r\n' not in stack:
         current_recv = conn.recv(1)
         stack += current_recv
         if not current_recv:
             break
-    return stack.split(b'\r\n', 1)[0]
+    return stack.split(b'\r\n\r\n', 1)[0]
 
 
 def recv_all(conn, buffer: int = 1024):
@@ -17,31 +20,32 @@ def recv_all(conn, buffer: int = 1024):
     content_length = buffer
     while content_length == buffer:
         c = conn.recv(buffer)
+        print(c)
         content += c
         content_length = len(c)
     return content
 
 
-def parse_request_line(line: bytes) -> dict:
-    from urllib.parse import unquote
-    method, url, ver = unquote(line.decode()).split(maxsplit = 2)
+def parse_req(content: bytes):
+    line, *head = content.decode().split('\r\n')
+    method, uv = line.split(' ', 1)
+    url, ver = uv.rsplit(' ', 1)
+    url = unquote(url)
     path, param = url.split('?', 1) if '?' in url else [url, '']
-    params = dict([tuple(p.split('=')) for p in param.split('&') if '=' in p])
-    return {'method': method, 'url': unquote(path), 'param': params, 'version': ver}
+    keyword, arg = {}, set()
+    for p in param.split('&'):
+        if '=' in p:
+            k, w = p.split('=')
+            keyword[k] = w
+        else:
+            arg.add(p)
+    header = dict(h.replace(' ', '').split(':', 1) for h in head)
+
+    return {'method': method, 'url': path, 'keyword': keyword,
+            'arg': arg, 'version': ver, 'header': header}
 
 
-def parse_content(content: bytes) -> dict:
-    header, data = content.split(b'\r\n\r\n')
-    headers = [tuple(h.decode().strip().split(':')) for h in header.split(b'\r\n')]
-    return {'header': headers, 'content': data}
-
-
-def parse_request(content: bytes) -> dict:
-    line = parse_request_line(content)
-    return {**line, **parse_content(line['content'])}
-
-
-HTTP_code = {
+HTTP_CODE = {
     100: "Continue",
     101: "Switching Protocols",
     102: "Processing",
