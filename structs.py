@@ -4,7 +4,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Union, Dict, Callable
+from typing import Union, Dict, Callable, List, Optional
 
 import utility
 
@@ -52,17 +52,7 @@ class Request:
 
 
 @dataclass
-class RAWResponse:
-    """Response with all-raw-data"""
-    content: bytes = b''
-
-    def generate(self):
-        """Returns the HTTP response data"""
-        return self.content
-
-
-@dataclass
-class Response(RAWResponse):
+class Response:
     """Response with normal initral function."""
     code: int = 200
     version: str = 'HTTP/1.1'
@@ -88,6 +78,9 @@ class Response(RAWResponse):
         self.header['Content-Type'] = self.header['Content-Type'].rsplit(';charset=')[0]
         self.header['Content-Type'] += f';charset={self.encoding}'
 
+    def __bool__(self):
+        return self.code != 200 or self.content is not None
+
     def generate(self):
         """Returns the encoded HTTP response data."""
         hd = '\r\n'.join([': '.join([h, self.header[h]]) for h in self.header])
@@ -99,24 +92,32 @@ class Response(RAWResponse):
 class Interface:
     """The main HTTP server handler."""
 
-    def __init__(self, func: Callable[[Request], Union[RAWResponse, None]],
-                 default_resp: RAWResponse = RAWResponse(b'HTTP/1.1 500 Internal Server Error/r/n/r/n')):
+    def __init__(self, func: Callable[[Request], Optional[Response]], default_resp: Response = Response(code = 500)):
         """
         :param func: A function to handle requests
         :param default_resp: HTTP content will be send when the function meets expections
         """
         self.default_resp = default_resp
         self._function = func
+        self.prev: List[Callable[[Request], Optional[Response]]] = []
+        self.after: List[Callable[[Request, Response], Optional[Response]]] = []
 
     def __enter__(self):
         return self
 
-    def process(self, request: Request):
+    def process(self, request: Request) -> Response:
         """
         Let the function processes the request and returns the results (if it has).
         :param request:  the request will be processed
         """
-        return self._function(request) or RAWResponse()
+        for p in self.prev:
+            pre_resp = p(request)
+            if pre_resp:
+                return pre_resp
+        resp = self._function(request)
+        for a in self.after:
+            resp = a(request, resp)
+        return resp
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type or exc_val or exc_tb:
@@ -169,8 +170,7 @@ class Node(Interface):
     """A interface that provides a main-interface to carry sub-Interfaces."""
 
     def __init__(self, interface_map: Union[Callable[[], Dict[str, Interface]], Dict[str, Interface]] = None,
-                 default_interface: Interface = DefaultInterface,
-                 default_resp: RAWResponse = RAWResponse(b'HTTP/1.1 500 Internal Server Error/r/n/r/n')):
+                 default_interface: Interface = DefaultInterface, default_resp: Response = Response(code = 500)):
         """
         :param interface_map: Initral mapping for interfaces
         :param default_interface: a special interface that actives when no interface be matched
@@ -193,7 +193,7 @@ class Node(Interface):
             target_interface = self.default_interface
             path = request.url
         request.path = request.path.removeprefix(path)  # process 'path'
-        return target_interface.process(request) or RAWResponse
+        return target_interface.process(request)
 
     @property
     def map(self):
@@ -228,9 +228,8 @@ class Session:
         """Execute the interface and request"""
         with self.interface as i:
             resp = i.process(self.request)
-            if resp.generate():
+            if resp:
                 self.connection.sendall(resp.generate())
-            time.sleep(0.01)
             self.connection.close()
         try:
             self.connection.sendall(self.interface.default_resp.generate())
