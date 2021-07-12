@@ -5,7 +5,6 @@ from typing import Tuple
 
 import interfaces
 import utility
-import logging
 from structs import Interface, Processer, Session, Node, Request, Response
 
 

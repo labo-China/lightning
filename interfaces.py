@@ -1,9 +1,11 @@
-from os.path import getsize, basename, isdir, isfile, exists
-from os import listdir
 import time
-from urllib.parse import quote
-from structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 from mimetypes import guess_type
+from os import listdir
+from os.path import getsize, basename, isdir, isfile, exists
+from urllib.parse import quote
+from typing import Dict
+
+from structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 
 
 class File(MethodInterface):
@@ -71,7 +73,7 @@ class Folder(Node):
         super().__init__(interface_map = self.get_map if lazy else self.load_file(),
                          default_interface = Interface(self.default))
 
-    def load_file(self):
+    def load_file(self) -> Dict[str, Interface]:
         m = {}
         try:
             for name in listdir(self.path):
@@ -84,7 +86,7 @@ class Folder(Node):
             return {}
         return m
 
-    def get_map(self):
+    def get_map(self) -> Dict[str, Interface]:
         if not self._file_map or time.time() - self.last_update > self.update_time:
             self.update_map()
         return self._file_map
@@ -97,7 +99,7 @@ class Folder(Node):
         print('Success')
 
     @staticmethod
-    def generate_default(request: Request, file_list: dict):
+    def generate_default(request: Request, file_list: dict) -> str:
         prev_url = request.url.rsplit('/', 1)[0]
         content = f'<html><head><title>Index of {request.url}</title></head><body bgcolor="white">' \
                   f'<h1>Index of {request.url}</h1><hr><pre><a href="{prev_url}">../</a>\n'
@@ -109,7 +111,7 @@ class Folder(Node):
             content += f'<a href="{request.url + "/" + y.filename}">{y.filename}</a>\n'
         return content
 
-    def default(self, request: Request):
+    def default(self, request: Request) -> Response:
         if self.status:
             return Response(code = self.status)
         f = self.map

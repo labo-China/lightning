@@ -45,5 +45,5 @@ def shell(request: structs.Request):
 
 
 a.bind('/t', test)
-a.bind('/dl', interfaces.Folder('B:/'))
+a.bind('/dl', interfaces.Folder('C:/'))
 a.run()

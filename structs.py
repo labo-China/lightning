@@ -4,7 +4,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Union, Dict, Callable, List, Optional
+from typing import Union, Dict, Callable, List, Optional, Tuple, Iterator, Any
 
 import utility
 
@@ -12,21 +12,21 @@ import utility
 @dataclass
 class Request:
     """Request recevived from the parser of server"""
-    addr: tuple = field(default = ('127.0.0.1', -1))
+    addr: Tuple[str, int] = field(default = ('127.0.0.1', -1))
     method: str = field(default = 'GET')
     url: str = field(default = '/')
     version: str = field(default = 'HTTP/1.1')
-    keyword: dict = field(default_factory = dict)
+    keyword: Dict[str, str] = field(default_factory = dict)
     arg: set = field(default_factory = set)
     header: Dict[str, str] = field(default_factory = dict)
-    conn: Union[socket.socket] = None
+    conn: socket.socket = None
     path: str = None
 
     def __post_init__(self):
         """Set path to url if path not specfied"""
         self.path = self.path or self.url
 
-    def content(self, is_iter: bool = False, buffer: int = 1024):
+    def content(self, is_iter: bool = False, buffer: int = 1024) -> Union[bytes, Iterator]:
         """
         Get the content of the Request.\n
         :param is_iter: specify whether the content will be returned as a generator
@@ -40,7 +40,7 @@ class Request:
                 yield s
         return utility.recv_all(conn = self.conn)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         ht = '\n'.join(': '.join((h, self.header[h])) for h in self.header)
         pr = '\n'.join(f'{k}: {self.keyword[k]}' for k in self.keyword.keys()) + '\n' + '; '.join(self.arg)
         return f'<Request [{self.url}]> from {self.addr} {self.version}\n' \
@@ -78,10 +78,10 @@ class Response:
         self.header['Content-Type'] = self.header['Content-Type'].rsplit(';charset=')[0]
         self.header['Content-Type'] += f';charset={self.encoding}'
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return self.code != 200 or self.content is not None
 
-    def generate(self):
+    def generate(self) -> bytes:
         """Returns the encoded HTTP response data."""
         hd = '\r\n'.join([': '.join([h, self.header[h]]) for h in self.header])
         text = f'{self.version} {self.code} {utility.HTTP_CODE[self.code]}\r\n' \
@@ -89,10 +89,13 @@ class Response:
         return text.encode(self.encoding) + self.content
 
 
+InterfaceFunction = Callable[[Request], Optional[Response]]
+
+
 class Interface:
     """The main HTTP server handler."""
 
-    def __init__(self, func: Callable[[Request], Optional[Response]], default_resp: Response = Response(code = 500)):
+    def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500)):
         """
         :param func: A function to handle requests
         :param default_resp: HTTP content will be send when the function meets expections
@@ -114,7 +117,7 @@ class Interface:
             pre_resp = p(request)
             if pre_resp:
                 return pre_resp
-        resp = self._function(request)
+        resp = self._function(request) or Response()
         for a in self.after:
             resp = a(request, resp)
         return resp
@@ -131,9 +134,10 @@ class Interface:
 class MethodInterface(Interface):
     """A interface class that supports specify interfaces by method"""
 
-    def __init__(self, get: Callable = None, head: Callable = None, post: Callable = None, put: Callable = None,
-                 delete: Callable = None, connect: Callable = None, options: Callable = None, trace: Callable = None,
-                 patch: Callable = None, strict: bool = True):
+    def __init__(self, get: InterfaceFunction = None, head: InterfaceFunction = None, post: InterfaceFunction = None,
+                 put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
+                 options: InterfaceFunction = None, trace: InterfaceFunction = None, patch: InterfaceFunction = None,
+                 strict: bool = True):
         self.get = get
         self.head = head
         self.post = post
@@ -145,14 +149,14 @@ class MethodInterface(Interface):
         self.patch = patch
         super().__init__(func = self.select)
 
-    def select(self, request: Request):
+    def select(self, request: Request) -> Optional[Response]:
         try:
-            method = self.__getattribute__(request.method.lower())
+            method: InterfaceFunction = self.__getattribute__(request.method.lower())
             return method(request)
         except AttributeError:
             return Response(code = 400)
 
-    def options_(self, request: Request):
+    def options_(self, request: Request) -> Response:
         """Default "OPTIONS" method implementation"""
         method_set = {self.get, self.head, self.post, self.put, self.delete,
                       self.connect, self.options, self.trace, self.patch}
@@ -177,11 +181,11 @@ class Node(Interface):
         :param default_resp: HTTP content will be send when the function meets expections
         """
         self._map = interface_map or {}
-        self._tree = {}
+        self._tree: Dict[str, Interface] = {}
         self.default_interface = default_interface
         super().__init__(self.select, default_resp)
 
-    def select(self, request: Request):
+    def select(self, request: Request) -> Response:
         """Select the matched interface and let it process requests"""
         interface_map = self.map
         for interface in interface_map:
@@ -196,7 +200,7 @@ class Node(Interface):
         return target_interface.process(request)
 
     @property
-    def map(self):
+    def map(self) -> Dict[str, Interface]:
         """Return interface map as a dictonary"""
         return {**(self._map() if isinstance(self._map, Callable) else self._map), **self._tree}
 
