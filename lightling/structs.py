@@ -4,9 +4,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Union, Dict, Callable, List, Optional, Tuple, Iterator, Any
+from typing import Union, Dict, Callable, List, Optional, Tuple, Iterator
 
-import utility
+from . import utility
 
 
 @dataclass
@@ -55,7 +55,7 @@ class Request:
 class Response:
     """Response with normal initral function."""
     code: int = 200
-    version: str = 'HTTP/1.1'
+    version: str = field(default = 'HTTP/1.1')
     header: Dict[str, str] = field(default_factory = dict)
     timestamp: Union[datetime, int] = int(time.time())
     content: Union[bytes, str] = b''

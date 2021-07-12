@@ -5,7 +5,7 @@ from os.path import getsize, basename, isdir, isfile, exists
 from urllib.parse import quote
 from typing import Dict
 
-from structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
+from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 
 
 class File(MethodInterface):
@@ -84,6 +84,8 @@ class Folder(Node):
                     m.update({'/' + name: Folder(abs_path, file_only = self.file_only, lazy = self.lazy)})
         except PermissionError:
             return {}
+        except FileNotFoundError:
+            return m
         return m
 
     def get_map(self) -> Dict[str, Interface]:

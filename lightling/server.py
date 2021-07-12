@@ -3,9 +3,8 @@ import socket
 import threading
 from typing import Tuple
 
-import interfaces
-import utility
-from structs import Interface, Processer, Session, Node, Request, Response
+from . import utility, interfaces
+from .structs import Interface, Processer, Session, Node, Request, Response
 
 
 class Server:
