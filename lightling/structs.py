@@ -95,13 +95,17 @@ InterfaceFunction = Callable[[Request], Optional[Response]]
 class Interface:
     """The main HTTP server handler."""
 
-    def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500)):
+    def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500), strict: bool = False):
         """
         :param func: A function to handle requests
         :param default_resp: HTTP content will be send when the function meets expections
+        :param strict: if it is True, the interface will catch exceed path in interfaces and return a 404 response.
+        :param prev: things to do before the function processes request, the result will cover the function.
+        :param after: things to do after the function processed request, they should return a Response object.
         """
         self.default_resp = default_resp
         self._function = func
+        self.strict = strict
         self.prev: List[Callable[[Request], Optional[Response]]] = []
         self.after: List[Callable[[Request, Response], Optional[Response]]] = []
 
@@ -113,6 +117,9 @@ class Interface:
         Let the function processes the request and returns the results (if it has).
         :param request:  the request will be processed
         """
+        print(request.path)
+        if self.strict and (request.path != '/'):
+            return Response(404)
         for p in self.prev:
             pre_resp = p(request)
             if pre_resp:
@@ -196,7 +203,8 @@ class Node(Interface):
         else:
             target_interface = self.default_interface
             path = request.url
-        request.path = request.path.removeprefix(path)  # process 'path'
+        # process 'path'
+        request.path = request.path.removeprefix(path)
         return target_interface.process(request)
 
     @property
@@ -234,7 +242,6 @@ class Session:
             resp = i.process(self.request)
             if resp:
                 self.connection.sendall(resp.generate())
-            self.connection.close()
         try:
             self.connection.sendall(self.interface.default_resp.generate())
         except OSError:
