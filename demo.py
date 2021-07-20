@@ -1,4 +1,4 @@
-from lightling import Node, Request, Response, Server, Folder
+from lightling import Node, Request, Response, Server, Folder, Interface
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
@@ -26,13 +26,13 @@ test = Node()
 @test.bind('/test')
 def hello_world(request: Request) -> Response:
     s = f'hello world! from {request.addr}'
-    return structs.Response(content = s)
+    return Response(content = s)
 
 
 @test.bind('/raw_test')
 def raw_hello(request: Request):
     s = f'hello world! from {request.addr}'
-    request.conn.sendall(structs.Response(content = s).generate())
+    request.conn.sendall(Response(content = s).generate())
 
 
 @a.bind('/exec')
