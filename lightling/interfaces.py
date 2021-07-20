@@ -111,7 +111,7 @@ class Folder(Node):
             content += f'<a href="{request.url + "/" + x.dirname}">{x.dirname}/</a>\n'
         for y in file:
             content += f'<a href="{request.url + "/" + y.filename}">{y.filename}</a>\n'
-        return content
+        return content + '</pre></body></html>'
 
     def default(self, request: Request) -> Response:
         if self.status:
