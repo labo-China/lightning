@@ -117,7 +117,6 @@ class Interface:
         Let the function processes the request and returns the results (if it has).
         :param request:  the request will be processed
         """
-        print(request.path)
         if self.strict and (request.path != '/'):
             return Response(404)
         for p in self.prev:
