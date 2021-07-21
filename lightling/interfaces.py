@@ -116,6 +116,7 @@ class Folder(Node):
     def default(self, request: Request) -> Response:
         if self.status:
             return Response(code = self.status)
+        request.path = request.path.removesuffix('/')
         f = self.map
         if request.path:
             for x in request.path.removeprefix('/').split('/'):
