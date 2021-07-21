@@ -144,23 +144,19 @@ class MethodInterface(Interface):
                  put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
                  options: InterfaceFunction = None, trace: InterfaceFunction = None, patch: InterfaceFunction = None,
                  strict: bool = True):
-        self.get = get
-        self.head = head
-        self.post = post
-        self.put = put
-        self.delete = delete
-        self.connect = connect
-        self.options = options or (self.options_ if strict else options)
-        self.trace = trace
-        self.patch = patch
+        self.methods = {'GET': get, 'HEAD': head, 'POST': post, 'PUT': put, 'DELETE': delete, 'CONNECT': connect,
+                        'OPTIONS': options or (self.options_ if strict else options), 'TRACE': trace, 'PATCH': patch}
         super().__init__(func = self.select)
 
     def select(self, request: Request) -> Optional[Response]:
-        try:
-            method: InterfaceFunction = self.__getattribute__(request.method.lower())
-            return method(request)
-        except AttributeError:
-            return Response(code = 400)
+        if request.method in self.methods:
+            method = self.methods.get(request.method)
+            if method:
+                return method(request)
+            else:
+                return Response(405)  # disallowed request method
+        else:
+            return Response(400)  # incorrect request method
 
     def options_(self, request: Request) -> Response:
         """Default "OPTIONS" method implementation"""
