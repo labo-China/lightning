@@ -4,7 +4,6 @@ from os import listdir
 from os.path import getsize, basename, isdir, isfile, exists
 from urllib.parse import quote
 from typing import Dict
-
 from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 
 
@@ -42,8 +41,7 @@ class File(MethodInterface):
             request.conn.sendfile(file, start, left)
         else:
             mime = guess_type(self.filename)[0] or 'application/octet-stream'
-            header = {'Content-Disposition':
-                      'attachment;filename=' + self.filename} if request.keyword.get('view') else {}
+            header = {'Content-Disposition': 'attachment;filename=' + self.filename}
             request.conn.sendall(Response(header = {'Content-Length': str(self.filesize),
                                                     'Content-Type': mime,
                                                     'Accept-Ranges': 'bytes'} | header).generate())
