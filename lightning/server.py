@@ -1,6 +1,7 @@
 import queue
 import socket
 import threading
+from ssl import SSLContext
 from typing import Tuple, List
 from . import utility, interfaces
 from .structs import Interface, Processer, Session, Node, Request, Response
@@ -9,11 +10,12 @@ from .structs import Interface, Processer, Session, Node, Request, Response
 class Server:
     def __init__(self, server_addr: Tuple[str, int], max_listen: int = 100,
                  timeout: int = None, default: Interface = interfaces.DefaultInterface, max_thread: int = 4,
-                 conn_famliy: socket.AddressFamily = socket.AF_INET):
+                 ssl_cert: str = None, conn_famliy: socket.AddressFamily = socket.AF_INET):
         self.is_running = False
         self.queue = queue.Queue()
         self.processor_list: List[Processer] = []
         self.listener = None
+
         self.addr = server_addr
         self.timeout = timeout
         self.max_thread = max_thread
@@ -25,6 +27,10 @@ class Server:
         self._sock = socket.socket(conn_famliy)
         self._sock.settimeout(timeout)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if ssl_cert:
+            ssl_context = SSLContext()
+            ssl_context.load_cert_chain(ssl_cert)
+            self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
         self._sock.bind(server_addr)
         self._sock.listen(max_listen)
 
