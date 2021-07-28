@@ -4,14 +4,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Union, Dict, Callable, List, Optional, Tuple, Iterator
+from typing import Union, Dict, Callable, List, Optional, Tuple, Generator
 
 from . import utility
 
 
 @dataclass
 class Request:
-    """Request recevived from the parser of server"""
+    """Request that recevived from the parser of server"""
     addr: Tuple[str, int] = field(default = ('127.0.0.1', -1))
     method: str = field(default = 'GET')
     url: str = field(default = '/')
@@ -26,21 +26,33 @@ class Request:
         """Set path to url if path not specfied"""
         self.path = self.path or self.url
 
-    def content(self, is_iter: bool = False, buffer: int = 1024) -> Union[bytes, Iterator]:
+    def content(self, buffer: int = 1024) -> bytes:
         """
         Get the content of the Request.\n
-        :param is_iter: specify whether the content will be returned as a generator
-        :param buffer: specify the buffer size of content (if is_iter is True or it will be ingored)
+        :param buffer: buffer size of content
         """
-        if is_iter:
-            s = buffer
-            while s == buffer:
-                c = self.conn.recv(buffer)
-                s = len(c)
-                yield s
-        return utility.recv_all(conn = self.conn)
+        return utility.recv_all(conn = self.conn, buffer = buffer)
 
-    def __repr__(self) -> str:
+    def iter_content(self, buffer: int = 1024) -> Generator[bytes, None, None]:
+        """
+        Get the content of the Request.\n
+        :param buffer: buffer size of content (if is_iter is True or it will be ingored)
+        """
+        content = True
+        while content:
+            content = self.conn.recv(buffer)
+            yield content
+
+    def generate(self) -> bytes:
+        """Generate the original request data from known request"""
+        args = '&'.join(self.arg)
+        keyword = '&'.join([f'{k}={self.keyword[k]}' for k in self.keyword.keys()])
+        param = ('?' + args + ('&' + keyword if keyword else '')) if args or keyword else ''
+        line = f'{self.method} {self.url.removesuffix("/") + param} {self.version}\r\n'
+        header = '\r\n'.join([f'{k}:{self.header[k]}' for k in self.header.keys()])
+        return (line + header + '\r\n\r\n').encode()
+
+    def get_overview(self) -> str:
         ht = '\n'.join(': '.join((h, self.header[h])) for h in self.header)
         pr = '\n'.join(f'{k}: {self.keyword[k]}' for k in self.keyword.keys()) + '\n' + '; '.join(self.arg)
         return f'<Request [{self.url}]> from {self.addr} {self.version}\n' \
@@ -50,11 +62,15 @@ class Request:
                f'Params:' \
                f'{pr}'
 
+    def __repr__(self) -> str:
+        return f'Request[{self.method} -> {self.url}]'
+
 
 @dataclass
 class Response:
     """Response with normal initral function."""
     code: int = 200
+    desc: str = None
     version: str = field(default = 'HTTP/1.1')
     header: Dict[str, str] = field(default_factory = dict)
     timestamp: Union[datetime, int] = int(time.time())
@@ -62,6 +78,9 @@ class Response:
     encoding: str = 'utf-8'
 
     def __post_init__(self):
+        # fill the desciption of request
+        if not self.desc:
+            self.desc = utility.HTTP_CODE[self.code]
         # convert int timestamp to timestamp object
         if isinstance(self.timestamp, int):
             self.timestamp = datetime.fromtimestamp(self.timestamp, tz = timezone.utc)
@@ -78,63 +97,65 @@ class Response:
         self.header['Content-Type'] = self.header['Content-Type'].rsplit(';charset=')[0]
         self.header['Content-Type'] += f';charset={self.encoding}'
 
-    def __bool__(self) -> bool:
-        return self.code != 200 or self.content is not None
-
     def generate(self) -> bytes:
         """Returns the encoded HTTP response data."""
         hd = '\r\n'.join([': '.join([h, self.header[h]]) for h in self.header])
-        text = f'{self.version} {self.code} {utility.HTTP_CODE[self.code]}\r\n' \
+        text = f'{self.version} {self.code} {self.desc}\r\n' \
                f'{hd}\r\n\r\n'
         return text.encode(self.encoding) + self.content
 
+    def __repr__(self) -> str:
+        return f'Response[{self.code}]'
 
-InterfaceFunction = Callable[[Request], Optional[Response]]
+    def __bool__(self) -> bool:
+        return self.code != 200 or self.content is not None
+
+
+InterfaceFunction = Callable[[Request], Optional[Union[Response, str]]]
 
 
 class Interface:
     """The main HTTP server handler."""
 
-    def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500), strict: bool = False):
+    def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500),
+                 pre: List[InterfaceFunction] = None, post: List[Callable[[Request, Response], Response]] = None,
+                 strict: bool = False):
         """
         :param func: A function to handle requests
         :param default_resp: HTTP content will be send when the function meets expections
         :param strict: if it is True, the interface will catch exceed path in interfaces and return a 404 response.
-        :param prev: things to do before the function processes request, the result will cover the function.
-        :param after: things to do after the function processed request, they should return a Response object.
+        :param pre: things to do before the function processes request, the result will cover the function.
+        :param post: things to do post the function processed request, they should return a Response object.
         """
         self.default_resp = default_resp
         self._function = func
         self.strict = strict
-        self.prev: List[Callable[[Request], Optional[Response]]] = []
-        self.after: List[Callable[[Request, Response], Optional[Response]]] = []
+        self.pre = pre or []
+        self.post = post or []
 
     def __enter__(self):
         return self
 
     def process(self, request: Request) -> Response:
         """
-        Let the function processes the request and returns the results (if it has).
-        :param request:  the request will be processed
+        Let the function processes the request and returns the result
+        :param request:  the request that will be processed
         """
         if self.strict and (request.path != '/'):
             return Response(404)
-        for p in self.prev:
+        for p in self.pre:
             pre_resp = p(request)
             if pre_resp:
                 return pre_resp
         resp = self._function(request) or Response()
-        for a in self.after:
+        if isinstance(resp, str):
+            resp = Response(content = resp)
+        for a in self.post:
             resp = a(request, resp)
         return resp
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type or exc_val or exc_tb:
-            if exc_type not in [ConnectionResetError, ConnectionAbortedError]:
-                import traceback
-                traceback.print_exc()
-                return False
-            return True
+        return True
 
 
 class MethodInterface(Interface):
@@ -169,7 +190,7 @@ class MethodInterface(Interface):
         return resp
 
 
-DefaultInterface = Interface(lambda request: Response(content = repr(request)))
+DefaultInterface = Interface(lambda request: Response(content = request.get_overview()))
 
 
 class Node(Interface):
@@ -232,7 +253,7 @@ class Session:
         self.connection = connection
 
     def execute(self):
-        """Execute the interface and request"""
+        """Execute the interface with request"""
         with self.interface as i:
             resp = i.process(self.request)
             if resp:
@@ -261,3 +282,6 @@ class Processer(threading.Thread):
             except queue.Empty:
                 continue
         return
+
+    def __del__(self):
+        print(f'{self.name} closed successful.')
