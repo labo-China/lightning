@@ -1,7 +1,7 @@
 import time
 from mimetypes import guess_type
 from os import listdir
-from os.path import getsize, basename, isdir, isfile, exists
+from os.path import getsize, basename, isdir, isfile
 from urllib.parse import quote
 from typing import Dict
 from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
@@ -9,6 +9,7 @@ from .structs import Interface, Response, Request, MethodInterface, Node, Defaul
 
 class File(MethodInterface):
     """The file interface"""
+
     def __init__(self, path: str, filename: str = None, range_support: bool = True, updateble: bool = False):
         self.path = path
         self.range = range_support
@@ -47,6 +48,9 @@ class File(MethodInterface):
                                                     'Accept-Ranges': 'bytes'} | header).generate())
             request.conn.sendfile(file)
         request.conn.close()
+
+    def __repr__(self) -> str:
+        return f'File[{self.path}]'
 
 
 class Folder(Node):
@@ -123,3 +127,6 @@ class Folder(Node):
                 else:
                     return Response(code = 404)
         return Response(content = self.generate_default(request, f), header = {'Content-Type': 'text/html'})
+
+    def __repr__(self) -> str:
+        return f'Folder[{self.path}]'
