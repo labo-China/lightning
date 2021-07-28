@@ -2,9 +2,19 @@ import socket
 from urllib.parse import unquote
 
 
-def recv_request_head(conn: socket.socket):
+def recv_request_line(conn: socket.socket) -> bytes:
+    stack = b''
+    while b'\r\n' not in stack:
+        current_recv = conn.recv(1)
+        stack += current_recv
+        if not current_recv:
+            break
+    return stack.split(b'\r\n')[0]
+
+
+def recv_request_head(conn: socket.socket) -> bytes:
     timeout = conn.gettimeout()
-    conn.settimeout(0.1)
+    conn.settimeout(0.25)
     stack = conn.recv(1)
     conn.settimeout(timeout)
     while b'\r\n\r\n' not in stack:
@@ -12,21 +22,19 @@ def recv_request_head(conn: socket.socket):
         stack += current_recv
         if not current_recv:
             break
-    return stack.split(b'\r\n\r\n', 1)[0]
+    return stack.split(b'\r\n\r\n')[0]
 
 
-def recv_all(conn, buffer: int = 1024):
+def recv_all(conn: socket.socket, buffer: int = 1024) -> bytes:
     content = b''
-    content_length = buffer
-    while content_length == buffer:
+    c = True
+    while c:
         c = conn.recv(buffer)
-        print(c)
         content += c
-        content_length = len(c)
     return content
 
 
-def parse_req(content: bytes):
+def parse_req(content: bytes) -> dict:
     line, *head = content.decode().split('\r\n')
     method, uv = line.split(' ', 1)
     url, ver = uv.rsplit(' ', 1)
