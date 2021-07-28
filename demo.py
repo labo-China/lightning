@@ -2,9 +2,7 @@ from lightling import Node, Request, Response, Server, Folder, Interface
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
-
-
-a = Server(('', 80), thread_limit = 8)
+a = Server(('', 80), max_thread = 8)
 print(f'You can visit this server at {a.addr}')
 
 
@@ -17,7 +15,7 @@ def hello_world(request: Request) -> Response:
 @a.bind('/raw_test')
 def raw_hello(request: Request):
     s = f'hello world! from {request.addr}'
-    request.conn.sendall(structs.Response(content = s).generate())
+    request.conn.sendall(Response(content = s).generate())
 
 
 test = Node()
