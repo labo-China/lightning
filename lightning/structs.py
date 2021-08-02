@@ -1,12 +1,111 @@
+import multiprocessing
+import os
 import queue
 import socket
-import threading
 import time
+from io import BytesIO
+from threading import Thread
+from multiprocessing import Process
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Union, Dict, Callable, List, Optional, Tuple, Generator
 
 from . import utility
+
+
+class HookedSocket(socket.socket):
+
+    def __init__(self, sock: socket.socket, buffer: int = 1024):
+        fd = sock.detach()
+        super().__init__(fileno = fd)  # Rebuild a socket object from given socket as super object
+        self.buffer = buffer
+        self.stack = BytesIO()
+
+    def _send_to_stack(self, data: bytes):
+        length = len(data)
+        sent = 0
+        self.stack.seek(0, 1)
+        write = self.stack.write
+        push = self.push
+        buffer = self.buffer
+        while length:
+            tosend = min(length, buffer - self.stack.getbuffer().nbytes)
+            d = data[:tosend]
+            sent += write(d)
+            length -= tosend
+            push(min(self.stack.getbuffer().nbytes, buffer))
+        return sent
+
+    def send(self, data: bytes, _: int = ...) -> int:
+        self._send_to_stack(data)
+        return len(data)
+
+    def sendall(self, data: bytes, _: int = ...) -> None:
+        self._send_to_stack(data)
+
+    def sendfile(self, file, offset: int = 0, count: Optional[int] = None) -> int:
+        """Copied from the _sendfile_use_send method of socket to implement hook features."""
+        self._check_sendfile_params(file, offset, count)
+        if self.gettimeout() == 0:
+            raise ValueError("non-blocking sockets are not supported")
+        if offset:
+            file.seek(offset)
+        blocksize = min(count, 8192) if count else 8192
+        total_sent = 0
+        # localize variable access to minimize overhead
+        file_read = file.read
+        sock_send = self._send_to_stack
+        try:
+            while True:
+                if count:
+                    blocksize = min(count - total_sent, blocksize)
+                    if blocksize <= 0:
+                        break
+                data = memoryview(file_read(blocksize))
+                if not data:
+                    break  # EOF
+                while True:
+                    try:
+                        sent = sock_send(data)
+                    except BlockingIOError:
+                        continue
+                    else:
+                        total_sent += sent
+                        if sent < len(data):
+                            data = data[sent:]
+                        else:
+                            break
+            return total_sent
+        finally:
+            if total_sent > 0 and hasattr(file, 'seek'):
+                file.seek(offset + total_sent)
+
+    def push(self, size: int = None):
+        total_sent = 0
+        count = size or self.buffer
+        blocksize = min(count, self.buffer) if count else self.buffer
+        sock_send = super().send
+        file_read = self.stack.read
+        self.stack.seek(0, 0)
+        while True:
+            if count:
+                blocksize = min(count - total_sent, blocksize)
+                if blocksize <= 0:
+                    break
+            data = memoryview(file_read(blocksize))
+            if not data:
+                break  # EOF
+            while True:
+                sent = sock_send(data)
+                total_sent += sent
+                if sent < len(data):
+                    data = data[sent:]
+                else:
+                    break
+
+    def close_(self) -> None:
+        self.push(self.stack.getbuffer().nbytes)  # flush buffer
+        super().close()
 
 
 @dataclass
@@ -118,8 +217,8 @@ class Interface:
     """The main HTTP server handler."""
 
     def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500),
-                 pre: List[InterfaceFunction] = None, post: List[Callable[[Request, Response], Response]] = None,
-                 strict: bool = False):
+                 pre: List[Callable[[Request], Union[Request, Response, str, None]]] = None,
+                 post: List[Callable[[Request, Response], Response]] = None, strict: bool = False):
         """
         :param func: A function to handle requests
         :param default_resp: HTTP content will be send when the function meets expections
@@ -144,9 +243,13 @@ class Interface:
         if self.strict and (request.path != '/'):
             return Response(404)
         for p in self.pre:
-            pre_resp = p(request)
-            if pre_resp:
-                return pre_resp
+            res = p(request)
+            if isinstance(res, Request):
+                request = res
+            elif isinstance(res, Response):
+                return res
+            elif isinstance(res, str):
+                return Response(content = res)
         resp = self._function(request) or Response()
         if isinstance(resp, str):
             resp = Response(content = resp)
@@ -155,7 +258,7 @@ class Interface:
         return resp
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        return True
+        return False
 
 
 class MethodInterface(Interface):
@@ -247,26 +350,28 @@ class Node(Interface):
 
 
 class Session:
-    def __init__(self, interface: Interface, request: Request, connection: socket.socket):
+    def __init__(self, interface: Interface, request: Request):
         self.interface = interface
         self.request = request
-        self.connection = connection
 
     def execute(self):
         """Execute the interface with request"""
         with self.interface as i:
             resp = i.process(self.request)
             if resp:
-                self.connection.sendall(resp.generate())
+                self.request.conn.sendall(resp.generate())
+            self.request.conn.close()
         try:
-            self.connection.sendall(self.interface.default_resp.generate())
+            self.request.conn.sendall(self.interface.default_resp.generate())
         except OSError:
             pass  # interface processed successful
         finally:
-            self.connection.close()
+            self.request.conn.close()
 
 
-class Processer(threading.Thread):
+class Worker:
+    base_type = None
+
     def __init__(self, request_queue: queue.Queue, timeout: float = 30):
         super().__init__()
         self.queue = request_queue
@@ -274,14 +379,32 @@ class Processer(threading.Thread):
         self.timeout = timeout
 
     def run(self):
-        """The main precesser thread"""
         self.running_state = True
         while self.running_state:
             try:
                 self.queue.get(timeout = self.timeout).execute()
             except queue.Empty:
                 continue
+            except KeyboardInterrupt:
+                return
         return
 
     def __del__(self):
         print(f'{self.name} closed successful.')
+
+
+class ThreadWorker(Worker, Thread):
+    base_type = Thread
+    queue_type = queue.Queue
+
+    def __init__(self, request_queue: queue.Queue, timeout: float = 30):
+        super().__init__(request_queue = request_queue, timeout = timeout)
+
+
+class ProcessWorker(Worker, Process):
+    """This class is unavailable for some unknown reason. Don`t use it!!!"""
+    base_type = Process
+    queue_type = multiprocessing.Queue
+
+    def __init__(self, request_queue: multiprocessing.Queue, timeout: float = 30):
+        super().__init__(request_queue = request_queue, timeout = timeout)
