@@ -2,9 +2,8 @@ import time
 from mimetypes import guess_type
 from os import listdir
 from os.path import getsize, basename, isdir, isfile
-from urllib.parse import quote
 from typing import Dict
-from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
+from .structs import Interface, Response, Request, MethodInterface, Node
 
 
 class File(MethodInterface):
@@ -104,15 +103,15 @@ class Folder(Node):
 
     @staticmethod
     def generate_default(request: Request, file_list: dict) -> str:
-        prev_url = request.url.rsplit('/', 1)[0]
+        prev_url = request.url.removesuffix('/').rsplit('/', 1)[0]
         content = f'<html><head><title>Index of {request.url}</title></head><body bgcolor="white">' \
                   f'<h1>Index of {request.url}</h1><hr><pre><a href="{prev_url}">../</a>\n'
         folder = filter(lambda f: isinstance(f, Folder), file_list.values())
         file = filter(lambda f: isinstance(f, File), file_list.values())
         for x in folder:
-            content += f'<a href="{request.url + "/" + x.dirname}">{x.dirname}/</a>\n'
+            content += f'<a href="{request.url + x.dirname}">{x.dirname}/</a>\n'
         for y in file:
-            content += f'<a href="{request.url + "/" + y.filename}">{y.filename}</a>\n'
+            content += f'<a href="{request.url + y.filename}">{y.filename}</a>\n'
         return content + '</pre></body></html>'
 
     def default(self, request: Request) -> Response:
