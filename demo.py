@@ -1,8 +1,9 @@
-from lightning import Node, Request, Response, Server, Folder, Interface
+from lightning import Node, Request, Response, Server, Folder, Interface, HookedSocket
+from typing import Callable
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
-a = Server(('', 80), max_thread = 8)
+a = Server(('', 80), max_instance = 8)
 print(f'You can visit this server at {a.addr}')
 
 
@@ -42,4 +43,5 @@ def shell(request: Request):
 
 a.bind('/t', test)
 a.bind('/dl', Folder('C:/'))
-a.run()
+if __name__ == '__main__':
+    a.run()
