@@ -1,25 +1,29 @@
 import queue
 import socket
-import threading
+from threading import Thread
+from multiprocessing import Process
 from ssl import SSLContext
-from typing import Tuple, List
+from typing import Tuple, List, Union
 from . import utility, interfaces
-from .structs import Interface, Processer, Session, Node, Request, Response
+from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Session, Node, Request, Response
 
 
 class Server:
     def __init__(self, server_addr: Tuple[str, int], max_listen: int = 100,
-                 timeout: int = None, default: Interface = interfaces.DefaultInterface, max_thread: int = 4,
-                 ssl_cert: str = None, conn_famliy: socket.AddressFamily = socket.AF_INET):
+                 timeout: int = None, default: Interface = interfaces.DefaultInterface, max_instance: int = 4,
+                 multi_status: str = 'thread', ssl_cert: str = None,
+                 conn_famliy: socket.AddressFamily = socket.AF_INET):
         self.is_running = False
-        self.queue = queue.Queue()
-        self.processor_list: List[Processer] = []
         self.listener = None
-
         self.addr = server_addr
         self.timeout = timeout
-        self.max_thread = max_thread
+        self.max_instance = max_instance
         self.max_listen = max_listen
+
+        self.worker_type = ThreadWorker if multi_status == 'thread' else ProcessWorker \
+            if multi_status == 'process' else None  # DON`T use 'process'! It`s unavailable now.
+        self.queue = self.worker_type.queue_type()
+        self.processor_list: List[Worker] = []
 
         self.root_node = Node(default_interface = default)
         self.bind = self.root_node.bind
@@ -38,10 +42,9 @@ class Server:
         self.is_running = True
         self._sock.settimeout(self.timeout)
         print('Initraling request processor...')
-        self.processor_list = [Processer(self.queue) for _ in range(self.max_thread)]
+        self.processor_list = [self.worker_type(self.queue) for _ in range(self.max_instance)]
         print(f'Listening request on {self.addr}')
-        self.listener = threading.Thread(target = self.accept_request)
-        self.listener.setDaemon(True)
+        self.listener = Thread(target = self.accept_request)
         self.listener.start()
         if block:
             self.listener.join()
@@ -63,8 +66,8 @@ class Server:
         try:
             request = Request(addr = address,
                               **utility.parse_req(utility.recv_request_head(connection)), conn = connection)
-            task = Session(self.root_node, request, connection)
-            self.queue.put(task)
+            session = Session(self.root_node, request)
+            self.queue.put(session)
         except ValueError:
             try:
                 connection.sendall(Response(code = 400).generate())
@@ -91,15 +94,21 @@ class Server:
         return
 
     def terminate(self):
+        def _terminate(worker: Worker):
+            if isinstance(worker, ProcessWorker):
+                worker.terminate()
+            else:
+                worker.join(0)
+
         if self.is_running:
             self.is_running = False
             for t in self.processor_list:
                 print(f'Terminating {t.name}...')
-                t.join(0)
+                _terminate(t)
             self._sock.close()
         if self.listener.is_alive():
             print('Terminating connection listener...')
-            self.listener.join(0)
+            _terminate(self.listener)
         print('Server closed successful.')
 
     def __repr__(self) -> str:
