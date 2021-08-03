@@ -113,3 +113,6 @@ class Server:
 
     def __repr__(self) -> str:
         return f'Server[{"running" if self.is_running else "closed"} on {self.addr}]'
+
+
+__all__ = ['Server']

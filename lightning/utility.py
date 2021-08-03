@@ -114,3 +114,5 @@ HTTP_CODE = {
     510: "Not Extended",
     600: "Unparseable Response Headers"
 }
+
+__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE']

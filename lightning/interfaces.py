@@ -129,3 +129,6 @@ class Folder(Node):
 
     def __repr__(self) -> str:
         return f'Folder[{self.path}]'
+
+
+__all__ = ['File', 'Folder']
