@@ -410,4 +410,5 @@ class ProcessWorker(Worker, Process):
         super().__init__(request_queue = request_queue, timeout = timeout)
 
 
-__all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket']
+__all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket', 'Session', 'Worker',
+           'ThreadWorker', 'ProcessWorker']
