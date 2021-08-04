@@ -1,5 +1,4 @@
-from lightning import Node, Request, Response, Server, Folder, Interface, HookedSocket
-from typing import Callable
+from lightning import Node, Request, Response, Server, Folder
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
