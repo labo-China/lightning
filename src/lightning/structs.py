@@ -391,7 +391,7 @@ class Worker:
         print(f'{self.name} closed successful.')
 
 
-class ThreadWorker(Worker, Thread):
+class ThreadWorker(Worker, threading.Thread):
     base_type = threading.Thread
     queue_type = queue.Queue
 
@@ -399,7 +399,7 @@ class ThreadWorker(Worker, Thread):
         super().__init__(request_queue = request_queue, timeout = timeout)
 
 
-class ProcessWorker(Worker, Process):
+class ProcessWorker(Worker, multiprocessing.Process):
     """This class is unavailable for some unknown reason. Don`t use it!!!"""
     base_type = multiprocessing.Process
     queue_type = multiprocessing.Queue
@@ -409,4 +409,4 @@ class ProcessWorker(Worker, Process):
 
 
 __all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket', 'Session', 'Worker',
-           'ThreadWorker', 'ProcessWorker']
+           'ThreadWorker', 'ProcessWorker', 'DefaultInterface']

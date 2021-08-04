@@ -3,7 +3,7 @@ from mimetypes import guess_type
 from os import listdir
 from os.path import getsize, basename, isdir, isfile
 from typing import Dict
-from .structs import Interface, Response, Request, MethodInterface, Node
+from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 
 
 class File(MethodInterface):
@@ -131,4 +131,4 @@ class Folder(Node):
         return f'Folder[{self.path}]'
 
 
-__all__ = ['File', 'Folder']
+__all__ = ['File', 'Folder', 'DefaultInterface']
