@@ -1,11 +1,9 @@
-import multiprocessing
-import os
 import queue
 import socket
 import time
 from io import BytesIO
-from threading import Thread
-from multiprocessing import Process
+import threading
+import multiprocessing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Union, Dict, Callable, List, Optional, Tuple, Generator
@@ -394,7 +392,7 @@ class Worker:
 
 
 class ThreadWorker(Worker, Thread):
-    base_type = Thread
+    base_type = threading.Thread
     queue_type = queue.Queue
 
     def __init__(self, request_queue: queue.Queue, timeout: float = 30):
@@ -403,7 +401,7 @@ class ThreadWorker(Worker, Thread):
 
 class ProcessWorker(Worker, Process):
     """This class is unavailable for some unknown reason. Don`t use it!!!"""
-    base_type = Process
+    base_type = multiprocessing.Process
     queue_type = multiprocessing.Queue
 
     def __init__(self, request_queue: multiprocessing.Queue, timeout: float = 30):
