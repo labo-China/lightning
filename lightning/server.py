@@ -1,9 +1,7 @@
-import queue
 import socket
 from threading import Thread
-from multiprocessing import Process
 from ssl import SSLContext
-from typing import Tuple, List, Union
+from typing import Tuple, List
 from . import utility, interfaces
 from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Session, Node, Request, Response
 
