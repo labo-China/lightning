@@ -265,10 +265,10 @@ class MethodInterface(Interface):
     def __init__(self, get: InterfaceFunction = None, head: InterfaceFunction = None, post: InterfaceFunction = None,
                  put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
                  options: InterfaceFunction = None, trace: InterfaceFunction = None, patch: InterfaceFunction = None,
-                 strict: bool = True):
+                 strict: bool = True, **kwargs):
         self.methods = {'GET': get, 'HEAD': head, 'POST': post, 'PUT': put, 'DELETE': delete, 'CONNECT': connect,
                         'OPTIONS': options or (self.options_ if strict else options), 'TRACE': trace, 'PATCH': patch}
-        super().__init__(func = self.select)
+        super().__init__(func = self.select, **kwargs)
 
     def select(self, request: Request) -> Optional[Response]:
         if request.method in self.methods:
@@ -329,22 +329,30 @@ class Node(Interface):
         """Return interface map as a dictonary"""
         return {**(self._map() if isinstance(self._map, Callable) else self._map), **self._tree}
 
-    def bind(self, pattern: str, interface: Interface = None, **kwargs):
-        """
+    def bind(self, pattern: str, interface_or_method: Union[Interface, List[str]] = None, **kwargs):
+        r"""
         Bind a interface or function into this node.
-        :param pattern: the url prefix that used to match requests
-        :param interface: the interface needs to bind
+
+        :param pattern: the url prefix that used to match requests.
+        :param interface_or_method: If the function has been using as a normal function, the value is the Interface
+            needs to bind. If the function has been using as a decorator or the value is None, the value is expected
+            HTTP methods list. If the value is None, it means the Interface has no limits on methods.
         """
         if not pattern.startswith('/'):
             pattern = '/' + pattern
-        if interface:
-            self._tree[pattern] = interface
+        if isinstance(interface_or_method, Interface):
+            self._tree[pattern] = interface_or_method
             return
+        else:
+            def decorator(func):
+                if isinstance(interface_or_method, list) and interface_or_method is not None:
+                    method_list = set(map(lambda x: x.lower(), interface_or_method))  # convert mothod list to lowercase
+                    parameter = dict(zip(method_list, [func] * len(method_list)))  # prepare the parameter for interface
+                    self._tree[pattern] = MethodInterface(**parameter, **kwargs)
+                else:
+                    self._tree[pattern] = Interface(func = func, **kwargs)
 
-        def decorator(func):
-            self._tree[pattern] = Interface(func = func, **kwargs)
-
-        return decorator
+            return decorator
 
 
 class Session:
@@ -398,6 +406,7 @@ class ThreadWorker(Worker, threading.Thread):
     def __init__(self, request_queue: queue.Queue, timeout: float = 30):
         super().__init__(request_queue = request_queue, timeout = timeout)
         self.setDaemon(True)
+
 
 class ProcessWorker(Worker, multiprocessing.Process):
     """This class is unavailable for some unknown reason. Don`t use it!!!"""
