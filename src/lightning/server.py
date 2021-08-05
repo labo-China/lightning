@@ -1,4 +1,5 @@
 import socket
+import time
 from threading import Thread
 from ssl import SSLContext
 from typing import Tuple, List
@@ -43,9 +44,15 @@ class Server:
         self.processor_list = [self.worker_type(self.queue) for _ in range(self.max_instance)]
         print(f'Listening request on {self.addr}')
         self.listener = Thread(target = self.accept_request)
+        self.listener.setDaemon(True)
         self.listener.start()
         if block:
-            self.listener.join()
+            while self.listener.is_alive():
+                try:
+                    time.sleep(1)
+                except KeyboardInterrupt:
+                    self.terminate()
+                    return
 
     def accept_request(self):
         for p in self.processor_list:

@@ -397,7 +397,7 @@ class ThreadWorker(Worker, threading.Thread):
 
     def __init__(self, request_queue: queue.Queue, timeout: float = 30):
         super().__init__(request_queue = request_queue, timeout = timeout)
-
+        self.setDaemon(True)
 
 class ProcessWorker(Worker, multiprocessing.Process):
     """This class is unavailable for some unknown reason. Don`t use it!!!"""
