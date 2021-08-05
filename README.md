@@ -31,8 +31,8 @@ Listening request on ('', 80)
 ## Advantage
 - Fewer dependencies, only depends on built-in modules
 - High extensibility, you can control the server from http-layer to socket-layer by inheriting classes
-- Easily devlopping, just drop your functions into Interface class to implement features
+- Easily developing, just drop your functions into Interface class to implement features
 
 ## About Author
-I am a middle student from China. If I am at school, the devlopping progress may be **very slow**. Sorry :(  
+I am a middle student from China. If I am at school, the developing progress may be **very slow**. Sorry :(  
 You can subscribe me on [bilibili](http://space.bilibili.com/439067826). Welcome!
