@@ -50,9 +50,9 @@ def parse_req(content: bytes) -> dict:
         else:
             arg.add(p)
 
-    header = dict(h.replace(' ', '').split(':', 1) for h in head)
+    header = dict(h.replace(' ', '').lower().split(':', 1) for h in head)  # "lower()" is for compatibility
     return {'method': method, 'url': path, 'keyword': keyword,
-            'arg': arg, 'version': ver, 'header': header}
+            'arg': arg, 'version': ver, 'header': header, 'query': '?' + param}
 
 
 HTTP_CODE = {

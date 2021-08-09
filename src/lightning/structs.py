@@ -1,9 +1,11 @@
 import queue
 import socket
 import time
+import os
 from io import BytesIO
 import threading
 import multiprocessing
+from ssl import SSLContext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Union, Dict, Callable, List, Optional, Tuple, Generator
@@ -116,6 +118,7 @@ class Request:
     keyword: Dict[str, str] = field(default_factory = dict)
     arg: set = field(default_factory = set)
     header: Dict[str, str] = field(default_factory = dict)
+    query: str = field(default = '')
     conn: socket.socket = None
     path: str = None
 
@@ -143,7 +146,7 @@ class Request:
     def generate(self) -> bytes:
         """Generate the original request data from known request"""
         args = '&'.join(self.arg)
-        keyword = '&'.join([f'{k}={self.keyword[k]}' for k in self.keyword.keys()])
+        keyword = '&'.join([f'{k[0]}={k[1]}' for k in self.keyword.items()])
         param = ('?' + args + ('&' + keyword if keyword else '')) if args or keyword else ''
         line = f'{self.method} {self.url.removesuffix("/") + param} {self.version}\r\n'
         header = '\r\n'.join([f'{k}:{self.header[k]}' for k in self.header.keys()])
@@ -151,7 +154,7 @@ class Request:
 
     def get_overview(self) -> str:
         ht = '\n'.join(': '.join((h, self.header[h])) for h in self.header)
-        pr = '\n'.join(f'{k}: {self.keyword[k]}' for k in self.keyword.keys()) + '\n' + '; '.join(self.arg)
+        pr = '\n'.join(f'{k[0]}: {k[1]}' for k in self.keyword.items()) + '\n' + '; '.join(self.arg)
         return f'<Request [{self.url}]> from {self.addr} {self.version}\n' \
                f'Method: {self.method}\n' \
                f'Headers: \n' \
@@ -259,16 +262,57 @@ class Interface:
         return False
 
 
+class WSGIInterface(Interface):
+    def __init__(self, application: Callable[[dict, Callable], Optional[bytes]], *args, **kwargs):
+        # remove 'pre' and 'post' arguments, they are unusable in WSGI standards.
+        self.app = application
+        self.response: Response = Response()
+        kwargs.pop('pre')
+        kwargs.pop('post')
+        super().__init__(func = self.call, *args, **kwargs)
+
+    def call(self, request) -> Response:
+        self.app(self.get_environ(request), self.start_response)
+        return self.response
+
+    def start_response(self, status: str, header: List[Tuple[str, str]], exc_info: list = None):
+        if exc_info:
+            raise exc_info[0].with_traceback(exc_info[1])
+        code, desc = status.split(' ', 1)
+        self.response = Response(code = code, desc = desc, header = dict(header))
+
+    @staticmethod
+    def get_environ(request: Request) -> dict:
+        environ = {}
+        environ.update(dict(os.environ))
+        environ['REQUEST_METHOD'] = request.method.upper()
+        environ['SCRIPT_NAME'] = request.url.removesuffix(request.path)
+        environ['PATH_INFO'] = request.path.removeprefix('/')
+        environ['QUERY_STRING'] = request.query
+        environ['CONTENT_TYPE'] = request.header.get('content-type') or ''
+        environ['CONTENT_LENGTH'] = request.header.get('content-length') or ''
+        environ['SERVER_NAME'], environ['SERVER_PORT'] = request.conn.getsockname()
+        environ['SERVER_PROTOCOL'] = request.version
+        map(lambda h: environ.update({f'HTTP_{h[0].upper()}': h[1]}), request.header.items())  # Set HTTP_xxx variables
+        environ['wsgi.version'] = (1, 0)
+        environ['wsgi.url_scheme'] = 'https' if isinstance(request.conn, SSLContext) else 'http'
+        environ['wsgi.input'] = request.conn.makefile()
+        environ['wsgi.errors'] = None  # unavailable now
+        environ['wsgi.multithread'] = environ['wsgi.multiprocess'] = False
+        environ['wsgi.run_once'] = True  # This server supports running application for multiple times
+        return environ
+
+
 class MethodInterface(Interface):
     """A interface class that supports specify interfaces by method"""
 
     def __init__(self, get: InterfaceFunction = None, head: InterfaceFunction = None, post: InterfaceFunction = None,
                  put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
                  options: InterfaceFunction = None, trace: InterfaceFunction = None, patch: InterfaceFunction = None,
-                 strict: bool = True, **kwargs):
+                 strict: bool = True, *args, **kwargs):
         self.methods = {'GET': get, 'HEAD': head, 'POST': post, 'PUT': put, 'DELETE': delete, 'CONNECT': connect,
                         'OPTIONS': options or (self.options_ if strict else options), 'TRACE': trace, 'PATCH': patch}
-        super().__init__(func = self.select, **kwargs)
+        super().__init__(func = self.select, *args, **kwargs)
 
     def select(self, request: Request) -> Optional[Response]:
         if request.method in self.methods:
@@ -312,7 +356,7 @@ class Node(Interface):
     def select(self, request: Request) -> Response:
         """Select the matched interface and let it process requests"""
         interface_map = self.map
-        for interface in interface_map:
+        for interface in sorted(interface_map):
             if request.path.startswith(interface + '/') or request.path == interface:
                 target_interface = interface_map[interface]
                 path = interface
@@ -329,7 +373,7 @@ class Node(Interface):
         """Return interface map as a dictonary"""
         return {**(self._map() if isinstance(self._map, Callable) else self._map), **self._tree}
 
-    def bind(self, pattern: str, interface_or_method: Union[Interface, List[str]] = None, **kwargs):
+    def bind(self, pattern: str, interface_or_method: Union[Interface, List[str]] = None, *args, **kwargs):
         r"""
         Bind a interface or function into this node.
 
@@ -348,9 +392,9 @@ class Node(Interface):
                 if isinstance(interface_or_method, list) and interface_or_method is not None:
                     method_list = set(map(lambda x: x.lower(), interface_or_method))  # convert mothod list to lowercase
                     parameter = dict(zip(method_list, [func] * len(method_list)))  # prepare the parameter for interface
-                    self._tree[pattern] = MethodInterface(**parameter, **kwargs)
+                    self._tree[pattern] = MethodInterface(*args, **parameter, **kwargs)
                 else:
-                    self._tree[pattern] = Interface(func = func, **kwargs)
+                    self._tree[pattern] = Interface(func = func, *args, **kwargs)
 
             return decorator
 
