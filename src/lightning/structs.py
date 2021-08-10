@@ -8,7 +8,7 @@ import multiprocessing
 from ssl import SSLContext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Union, Dict, Callable, List, Optional, Tuple, Generator
+from typing import Union, Dict, Callable, List, Optional, Tuple, Generator, Iterable
 
 from . import utility
 
@@ -263,21 +263,34 @@ class Interface:
 
 
 class WSGIInterface(Interface):
-    def __init__(self, application: Callable[[dict, Callable], Optional[bytes]], *args, **kwargs):
+    def __init__(self, application: Callable[[dict, Callable], Iterable[bytes]], *args, **kwargs):
         # remove 'pre' and 'post' arguments, they are unusable in WSGI standards.
         self.app = application
         self.response: Response = Response()
+        self.content_iter: Iterable = ()
         kwargs.pop('pre')
         kwargs.pop('post')
         super().__init__(func = self.call, *args, **kwargs)
 
-    def call(self, request) -> Response:
-        self.app(self.get_environ(request), self.start_response)
-        return self.response
+    def call(self, request: Request) -> Response:
+        self.content_iter = self.app(self.get_environ(request), self.start_response).__iter__()
+        data = self.response.generate()
+        try:
+            while data == self.response.generate():  # Waiting for the first non-empty response
+                data += self.content_iter.__next__()
+            for d in self.content_iter:
+                request.conn.send(d)
+        except StopIteration:
+            request.conn.send(data)  # Send a HTTP response with an empty body if no content is provided
+        finally:
+            # Reset static variables
+            self.response = Response()
+            self.content_iter = ()
+        return Response()  # Avoid interface to send response data
 
-    def start_response(self, status: str, header: List[Tuple[str, str]], exc_info: list = None):
+    def start_response(self, status: str, header: List[Tuple[str, str]], exc_info: tuple = None):
         if exc_info:
-            raise exc_info[0].with_traceback(exc_info[1])
+            raise exc_info[1].with_traceback(exc_info[2])
         code, desc = status.split(' ', 1)
         self.response = Response(code = code, desc = desc, header = dict(header))
 
@@ -296,7 +309,7 @@ class WSGIInterface(Interface):
         map(lambda h: environ.update({f'HTTP_{h[0].upper()}': h[1]}), request.header.items())  # Set HTTP_xxx variables
         environ['wsgi.version'] = (1, 0)
         environ['wsgi.url_scheme'] = 'https' if isinstance(request.conn, SSLContext) else 'http'
-        environ['wsgi.input'] = request.conn.makefile()
+        environ['wsgi.input'] = request.conn.makefile(mode = '+')
         environ['wsgi.errors'] = None  # unavailable now
         environ['wsgi.multithread'] = environ['wsgi.multiprocess'] = False
         environ['wsgi.run_once'] = True  # This server supports running application for multiple times
@@ -435,8 +448,6 @@ class Worker:
                 self.queue.get(timeout = self.timeout).execute()
             except queue.Empty:
                 continue
-            except KeyboardInterrupt:
-                return
         return
 
     def __del__(self):
