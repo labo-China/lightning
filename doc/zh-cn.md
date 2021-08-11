@@ -23,9 +23,7 @@ server.run()
 ```
 ```shell
 $ python example.py
-Initraling request processor...
-Listening request on ('', 80)
- 
+Server running on ('0.0.0.0', 80). Press Ctrl+C to quit. 
 ```
 ***
 
