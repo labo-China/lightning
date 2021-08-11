@@ -1,3 +1,4 @@
+import logging
 import time
 from mimetypes import guess_type
 from os import listdir
@@ -95,11 +96,11 @@ class Folder(Node):
         return self._file_map
 
     def update_map(self):
-        print(f'Updating the map of {self.path}...', end = '')
+        logging.info(f'Updating the map of {self.path}...', end = '')
         mapping = self.load_file()
         self._file_map = mapping
         self.last_update = time.time()
-        print('Success')
+        logging.info('Success')
 
     @staticmethod
     def generate_default(request: Request, file_list: dict) -> str:
