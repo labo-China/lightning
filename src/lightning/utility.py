@@ -55,6 +55,10 @@ def parse_req(content: bytes) -> dict:
             'arg': arg, 'version': ver, 'header': header, 'query': '?' + param}
 
 
+def shrink_string(s: str, max_len: int = 40):
+    return s[:max_len - 3] + '...' if len(s) > max_len else s
+
+
 HTTP_CODE = {
     100: "Continue",
     101: "Switching Protocols",
@@ -115,4 +119,4 @@ HTTP_CODE = {
     600: "Unparseable Response Headers"
 }
 
-__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE']
+__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'shrink_string']

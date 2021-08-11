@@ -5,6 +5,7 @@ import os
 from io import BytesIO
 import threading
 import multiprocessing
+import logging
 from ssl import SSLContext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,8 +21,10 @@ class HookedSocket(socket.socket):
         super().__init__(fileno = fd)  # Rebuild a socket object from given socket as super object
         self.buffer = buffer
         self.stack = BytesIO()
+        self.file = self.makefile('wb')
+        logging.info(f'hooked socket from {self.getpeername()}')
 
-    def _send_to_stack(self, data: bytes):
+    def _send_to_stack(self, data: bytes) -> int:
         length = len(data)
         sent = 0
         self.stack.seek(0, 1)
@@ -84,7 +87,7 @@ class HookedSocket(socket.socket):
         total_sent = 0
         count = size or self.buffer
         blocksize = min(count, self.buffer) if count else self.buffer
-        sock_send = super().send
+        sock_send = self.file.write
         file_read = self.stack.read
         self.stack.seek(0, 0)
         while True:
@@ -102,6 +105,7 @@ class HookedSocket(socket.socket):
                     data = data[sent:]
                 else:
                     break
+        self.file.flush()
 
     def close_(self) -> None:
         self.push(self.stack.getbuffer().nbytes)  # flush buffer
@@ -261,19 +265,22 @@ class Interface:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
 
+    def __repr__(self) -> str:
+        return f'Interface[{self._function.__name__}]'
+
 
 class WSGIInterface(Interface):
-    def __init__(self, application: Callable[[dict, Callable], Iterable[bytes]], *args, **kwargs):
+    def __init__(self, application: Callable[[dict, Callable], Optional[Iterable[bytes]]], *args, **kwargs):
         # remove 'pre' and 'post' arguments, they are unusable in WSGI standards.
         self.app = application
         self.response: Response = Response()
         self.content_iter: Iterable = ()
-        kwargs.pop('pre')
-        kwargs.pop('post')
+        kwargs.update({'pre': None, 'post': None})
         super().__init__(func = self.call, *args, **kwargs)
 
     def call(self, request: Request) -> Response:
-        self.content_iter = self.app(self.get_environ(request), self.start_response).__iter__()
+        resp = self.app(self.get_environ(request), self.start_response)
+        self.content_iter = (resp or []).__iter__()
         data = self.response.generate()
         try:
             while data == self.response.generate():  # Waiting for the first non-empty response
@@ -288,11 +295,12 @@ class WSGIInterface(Interface):
             self.content_iter = ()
         return Response()  # Avoid interface to send response data
 
-    def start_response(self, status: str, header: List[Tuple[str, str]], exc_info: tuple = None):
+    def start_response(self, status: str, header: List[Tuple[str, str]] = None, exc_info: tuple = None):
+        logging.info(f'start_response is called by {self.app.__name__}')
         if exc_info:
             raise exc_info[1].with_traceback(exc_info[2])
         code, desc = status.split(' ', 1)
-        self.response = Response(code = code, desc = desc, header = dict(header))
+        self.response = Response(code = code, desc = desc, header = dict(header or {}))
 
     @staticmethod
     def get_environ(request: Request) -> dict:
@@ -309,11 +317,14 @@ class WSGIInterface(Interface):
         map(lambda h: environ.update({f'HTTP_{h[0].upper()}': h[1]}), request.header.items())  # Set HTTP_xxx variables
         environ['wsgi.version'] = (1, 0)
         environ['wsgi.url_scheme'] = 'https' if isinstance(request.conn, SSLContext) else 'http'
-        environ['wsgi.input'] = request.conn.makefile(mode = '+')
+        environ['wsgi.input'] = request.conn.makefile(mode = 'rwb')
         environ['wsgi.errors'] = None  # unavailable now
         environ['wsgi.multithread'] = environ['wsgi.multiprocess'] = False
         environ['wsgi.run_once'] = True  # This server supports running application for multiple times
         return environ
+
+    def __repr__(self) -> str:
+        return f'WSGIInterface[{self.app.__name__}]'
 
 
 class MethodInterface(Interface):
@@ -347,8 +358,17 @@ class MethodInterface(Interface):
             resp.header.update({'Access-Control-Allow-Origin': request.header['Origin']})
         return resp
 
+    def __repr__(self) -> str:
+        desc = " ".join(f"{m[0]}=>{m[1].__name__}" for m in self.methods.items() if m[1])
+        return f'Interface[{utility.shrink_string(desc)}]'
 
-DefaultInterface = Interface(lambda request: Response(content = request.get_overview()))
+
+# for compatibility of multi-processing
+def default(request: Request) -> Response:
+    return Response(content = request.get_overview())
+
+
+DefaultInterface = Interface(default)
 
 
 class Node(Interface):
@@ -361,14 +381,16 @@ class Node(Interface):
         :param default_interface: a special interface that actives when no interface be matched
         :param default_resp: HTTP content will be send when the function meets expections
         """
+        super().__init__(self.select, default_resp)
         self._map = interface_map or {}
         self._tree: Dict[str, Interface] = {}
         self.default_interface = default_interface
-        super().__init__(self.select, default_resp)
+        self.recent_repr: str = ''
 
     def select(self, request: Request) -> Response:
         """Select the matched interface and let it process requests"""
         interface_map = self.map
+        self.recent_repr = ''
         for interface in sorted(interface_map):
             if request.path.startswith(interface + '/') or request.path == interface:
                 target_interface = interface_map[interface]
@@ -379,6 +401,7 @@ class Node(Interface):
             path = request.url
         # process 'path'
         request.path = request.path.removeprefix(path)
+        self.recent_repr = repr(target_interface)
         return target_interface.process(request)
 
     @property
@@ -399,17 +422,31 @@ class Node(Interface):
             pattern = '/' + pattern
         if isinstance(interface_or_method, Interface):
             self._tree[pattern] = interface_or_method
+            logging.info(f'{interface_or_method} is bind on {pattern}')
             return
         else:
             def decorator(func):
                 if isinstance(interface_or_method, list) and interface_or_method is not None:
                     method_list = set(map(lambda x: x.lower(), interface_or_method))  # convert mothod list to lowercase
                     parameter = dict(zip(method_list, [func] * len(method_list)))  # prepare the parameter for interface
-                    self._tree[pattern] = MethodInterface(*args, **parameter, **kwargs)
+                    self.bind(pattern, MethodInterface(*args, **parameter, **kwargs))
                 else:
-                    self._tree[pattern] = Interface(func = func, *args, **kwargs)
+                    self.bind(pattern, Interface(func = func, *args, **kwargs))
+                return func
 
             return decorator
+
+    def _repr(self) -> str:
+        desc = " ".join(f"{x[0]}=>{x[1]}" for x in self.map.items())
+        return f'Node[{utility.shrink_string(desc)}]'
+
+    def __repr__(self) -> str:
+        if self.recent_repr:
+            ret = self.recent_repr
+            self.recent_repr = ''
+        else:
+            ret = self._repr()
+        return ret
 
 
 class Session:
@@ -421,6 +458,7 @@ class Session:
         """Execute the interface with request"""
         with self.interface as i:
             resp = i.process(self.request)
+            logging.info(f'{i} processed successful with {resp}')
             if resp:
                 self.request.conn.sendall(resp.generate())
             self.request.conn.close()
@@ -442,6 +480,7 @@ class Worker:
         self.timeout = timeout
 
     def run(self):
+        logging.info(f'{self.name} is running')
         self.running_state = True
         while self.running_state:
             try:
@@ -451,7 +490,7 @@ class Worker:
         return
 
     def __del__(self):
-        print(f'{self.name} closed successful.')
+        logging.info(f'{self.name} closed successful.')
 
 
 class ThreadWorker(Worker, threading.Thread):
@@ -473,4 +512,4 @@ class ProcessWorker(Worker, multiprocessing.Process):
 
 
 __all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket', 'Session', 'Worker',
-           'ThreadWorker', 'ProcessWorker', 'DefaultInterface']
+           'ThreadWorker', 'ProcessWorker', 'DefaultInterface', 'WSGIInterface']

@@ -3,8 +3,11 @@ import time
 from threading import Thread
 from ssl import SSLContext
 from typing import Tuple, List
+import logging
 from . import utility, interfaces
 from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Session, Node, Request, Response
+
+logging.basicConfig(level = 'INFO', format = '[%(levelname)s] %(message)s')
 
 
 class Server:
@@ -40,12 +43,13 @@ class Server:
     def run(self, block: bool = True):
         self.is_running = True
         self._sock.settimeout(self.timeout)
-        print('Initraling request processor...')
+        logging.info('Initraling request processor...')
         self.processor_list = [self.worker_type(self.queue) for _ in range(self.max_instance)]
-        print(f'Listening request on {self.addr}')
+        logging.info(f'Listening request on {self.addr}')
         self.listener = Thread(target = self.accept_request)
         self.listener.setDaemon(True)
         self.listener.start()
+        print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
         if block:
             while self.listener.is_alive():
                 try:
@@ -65,7 +69,7 @@ class Server:
             except OSError:
                 return  # Server has shut down
             self.handle_request(connection, address)
-        print('Request listening stopped.')  # This should not appear in the terminal
+        logging.info('Request listening stopped.')  # This should not appear in the terminal
 
     def handle_request(self, connection, address):
         try:
@@ -89,13 +93,13 @@ class Server:
                 t.running_state = False
                 t.timeout = 0
             for t in self.processor_list:
-                print(f'Waiting for active session {t.name}...')
+                logging.info(f'Waiting for active session {t.name}...')
                 t.join(timeout)
             self._sock.settimeout(0)
         if self.listener:
-            print('Waiting for connection listener...')
+            logging.info('Waiting for connection listener...')
             self.listener.join(timeout)
-        print('Server paused successful.')
+        logging.info('Server paused successful.')
         return
 
     def terminate(self):
@@ -108,13 +112,13 @@ class Server:
         if self.is_running:
             self.is_running = False
             for t in self.processor_list:
-                print(f'Terminating {t.name}...')
+                logging.info(f'Terminating {t.name}...')
                 _terminate(t)
             self._sock.close()
         if self.listener.is_alive():
-            print('Terminating connection listener...')
+            logging.info('Terminating connection listener...')
             _terminate(self.listener)
-        print('Server closed successful.')
+        logging.info('Server closed successful.')
 
     def __repr__(self) -> str:
         return f'Server[{"running" if self.is_running else "closed"} on {self.addr}]'
