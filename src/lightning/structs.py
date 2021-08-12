@@ -140,7 +140,7 @@ class Request:
     def iter_content(self, buffer: int = 1024) -> Generator[bytes, None, None]:
         """
         Get the content of the Request.\n
-        :param buffer: buffer size of content (if is_iter is True or it will be ingored)
+        :param buffer: buffer size of content (if is_iter is True, or it will be ingored)
         """
         content = True
         while content:
@@ -182,7 +182,7 @@ class Response:
     encoding: str = 'utf-8'
 
     def __post_init__(self):
-        # fill the desciption of request
+        # fill request desciptions
         if not self.desc:
             self.desc = utility.HTTP_CODE[self.code]
         # convert int timestamp to timestamp object
@@ -226,10 +226,10 @@ class Interface:
                  post: List[Callable[[Request, Response], Response]] = None, strict: bool = False):
         """
         :param func: A function to handle requests
-        :param default_resp: HTTP content will be send when the function meets expections
-        :param strict: if it is True, the interface will catch exceed path in interfaces and return a 404 response.
-        :param pre: things to do before the function processes request, the result will cover the function.
-        :param post: things to do post the function processed request, they should return a Response object.
+        :param default_resp: HTTP content will be sent when the function meets expections
+        :param strict: if it is True, the interface will catch exceed path in interfaces and return a 404 response
+        :param pre: things to do before the function processes request, the result will cover the function
+        :param post: things to do post the function processed request, they should return a Response object
         """
         self.default_resp = default_resp
         self._function = func
@@ -288,7 +288,7 @@ class WSGIInterface(Interface):
             for d in self.content_iter:
                 request.conn.send(d)
         except StopIteration:
-            request.conn.send(data)  # Send a HTTP response with an empty body if no content is provided
+            request.conn.send(data)  # Send an HTTP response with an empty body if no content is provided
         finally:
             # Reset static variables
             self.response = Response()
@@ -328,7 +328,7 @@ class WSGIInterface(Interface):
 
 
 class MethodInterface(Interface):
-    """A interface class that supports specify interfaces by method"""
+    """An interface class that supports specify interfaces by method"""
 
     def __init__(self, get: InterfaceFunction = None, head: InterfaceFunction = None, post: InterfaceFunction = None,
                  put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
@@ -359,7 +359,7 @@ class MethodInterface(Interface):
         return resp
 
     def __repr__(self) -> str:
-        desc = " ".join(f"{m[0]}=>{m[1].__name__}" for m in self.methods.items() if m[1])
+        desc = "|".join(f"{m[0]}=>{m[1].__name__}" for m in self.methods.items() if m[1])
         return f'Interface[{utility.shrink_string(desc)}]'
 
 
@@ -372,14 +372,14 @@ DefaultInterface = Interface(default)
 
 
 class Node(Interface):
-    """A interface that provides a main-interface to carry sub-Interfaces."""
+    """An interface that provides a main-interface to carry sub-Interfaces."""
 
     def __init__(self, interface_map: Union[Callable[[], Dict[str, Interface]], Dict[str, Interface]] = None,
                  default_interface: Interface = DefaultInterface, default_resp: Response = Response(code = 500)):
         """
         :param interface_map: Initral mapping for interfaces
         :param default_interface: a special interface that actives when no interface be matched
-        :param default_resp: HTTP content will be send when the function meets expections
+        :param default_resp: HTTP content will be sent when the function meets expections
         """
         super().__init__(self.select, default_resp)
         self._map = interface_map or {}
@@ -411,7 +411,7 @@ class Node(Interface):
 
     def bind(self, pattern: str, interface_or_method: Union[Interface, List[str]] = None, *args, **kwargs):
         r"""
-        Bind a interface or function into this node.
+        Bind an interface or function into this node.
 
         :param pattern: the url prefix that used to match requests.
         :param interface_or_method: If the function has been using as a normal function, the value is the Interface
@@ -437,7 +437,7 @@ class Node(Interface):
             return decorator
 
     def _repr(self) -> str:
-        desc = " ".join(f"{x[0]}=>{x[1]}" for x in self.map.items())
+        desc = "|".join(f"{x[0]}=>{x[1]}" for x in self.map.items())
         return f'Node[{utility.shrink_string(desc)}]'
 
     def __repr__(self) -> str:
