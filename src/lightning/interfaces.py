@@ -1,9 +1,11 @@
 import logging
+import re
 import time
 from mimetypes import guess_type
 from os import listdir
 from os.path import getsize, basename, isdir, isfile
-from typing import Dict
+from re import Pattern, match, compile
+from typing import Dict, List, Union, Callable, Iterable, Generator
 from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 
 
@@ -54,13 +56,19 @@ class File(MethodInterface):
 
 
 class Folder(Node):
-    def __init__(self, path: str, file_only: bool = False, lazy: bool = True, update_time: int = 60):
+    FilterType = Union[Callable[[str], bool], Pattern, str]
+    _FilterParam = Union[Iterable[FilterType], FilterType]
+
+    def __init__(self, path: str, file_depth: int = -1, lazy: bool = True, update_time: int = 60,
+                 file_filter: _FilterParam = None, file_blocker: _FilterParam = None):
         self.path = path + '/' if not path.endswith('/') else path
         self.dirname = basename(path.removesuffix('/'))
-        self.file_only = file_only
+        self.file_depth = file_depth
         self.lazy = lazy
         self.update_time = update_time
         self.last_update = 0
+        self.filter = self._convert_filter(file_filter or '.')
+        self.blocker = self._convert_filter(file_blocker or [])
         self._file_map = {}
 
         try:
@@ -75,15 +83,55 @@ class Folder(Node):
         super().__init__(interface_map = self.get_map if lazy else self.load_file(),
                          default_interface = Interface(self.default))
 
+    @staticmethod
+    def _convert_filter(obj: _FilterParam) -> Iterable[Callable[[str], bool]]:
+        if isinstance(obj, str) or not hasattr(obj, '__iter__'):
+            obj: List[Folder.FilterType] = [obj]
+
+        def convert(f: Folder.FilterType) -> Callable[[str], bool]:
+            if isinstance(f, str):
+                # Convert string to regex pattern
+                # For string starts with "*.", converter will recognize it as a file suffix
+                string = r'.*?\.{}$'.format(f.split('*.', 1)[-1])
+                f = re.compile(string) if f.startswith('*.') else re.compile(f)
+            if isinstance(f, Pattern):
+                return lambda s: bool(f.match(s))
+            else:
+                if not callable(f):
+                    raise TypeError('Filter must be a string, regex pattern or callable object')
+                return f
+
+        return set(map(convert, obj))
+
+    def _is_passable(self, string: str) -> bool:
+        for filter_ in self.filter:
+            if filter_(string):
+                break
+        else:
+            return False
+        for blocker in self.blocker:
+            if blocker(string):
+                return False
+        else:
+            return True
+
+    def _filter(self, seq: Iterable[str]) -> Iterable[str]:
+        return filter(self._is_passable, seq)
+
     def load_file(self) -> Dict[str, Interface]:
+        if self.file_depth == 0:
+            return {}
         m = {}
         try:
             for name in listdir(self.path):
                 abs_path = self.path + name
                 if isfile(abs_path):
-                    m.update({'/' + name: File(abs_path)})
-                elif isdir(abs_path) and not self.file_only:
-                    m.update({'/' + name: Folder(abs_path, file_only = self.file_only, lazy = self.lazy)})
+                    if self._is_passable(name):
+                        m.update({'/' + name: File(abs_path)})
+                elif isdir(abs_path) and (self.file_depth == -1 or self.file_depth >= 2):
+                    next_file_depth = self.file_depth - 1 if self.file_depth != -1 else -1
+                    m.update({'/' + name: Folder(abs_path, file_depth = next_file_depth, file_filter = self.filter,
+                                                 file_blocker = self.blocker, lazy = self.lazy)})
         except PermissionError:
             return {}
         except FileNotFoundError:
@@ -96,11 +144,10 @@ class Folder(Node):
         return self._file_map
 
     def update_map(self):
-        logging.info(f'Updating the map of {self.path}...', end = '')
+        logging.info(f'Updating the map of {self.path}...')
         mapping = self.load_file()
         self._file_map = mapping
         self.last_update = time.time()
-        logging.info('Success')
 
     @staticmethod
     def generate_default(request: Request, file_list: dict) -> str:
