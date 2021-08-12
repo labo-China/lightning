@@ -7,7 +7,7 @@ import logging
 from . import utility, interfaces
 from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Session, Node, Request, Response
 
-logging.basicConfig(level = 'INFO', format = '[%(levelname)s] %(message)s')
+logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(message)s')
 
 
 class Server:
