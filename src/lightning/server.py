@@ -120,6 +120,13 @@ class Server:
             _terminate(self.listener)
         logging.info('Server closed successful.')
 
+    def __enter__(self):
+        self.run(block = False)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.terminate()
+        return True
+
     def __repr__(self) -> str:
         return f'Server[{"running" if self.is_running else "closed"} on {self.addr}]'
 
