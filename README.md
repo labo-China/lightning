@@ -4,15 +4,15 @@ A socket-based lightly python server framework
 Choose your language: English(current)  [简体中文](doc/zh-cn.md)
 ***
 ## Install
-Install and update with pip: (unusable now)  
-`$ pip install -U lightning`
+Install and update with pip:  
+`$ pip install -U lightning-server`
 ***
 ## Create an Example
 ```python
 # save this as example.py
 from lightning import Server
 
-server = Server(('', 80))
+server = Server()
 
 @server.bind('/')
 def hello(request):
