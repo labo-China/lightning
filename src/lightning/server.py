@@ -11,7 +11,7 @@ logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(me
 
 
 class Server:
-    def __init__(self, server_addr: Tuple[str, int], max_listen: int = 100,
+    def __init__(self, server_addr: Tuple[str, int] = ('', 80), max_listen: int = 100,
                  timeout: int = None, default: Interface = interfaces.DefaultInterface, max_instance: int = 4,
                  multi_status: str = 'thread', ssl_cert: str = None,
                  conn_famliy: socket.AddressFamily = socket.AF_INET):

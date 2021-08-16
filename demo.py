@@ -3,7 +3,7 @@ from src.lightning import Request, Response, Server, Folder
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
-a = Server(('', 80), max_instance = 8)
+a = Server()
 print(f'You can visit this server at {a.addr}')
 
 
