@@ -5,15 +5,15 @@
 选择你的语言: [English](../README.md)  简体中文(当前)
 ***
 ## 安装
-使用pip来安装和更新这个包: (当前不可用)  
-`$ pip install -U lightning`
+使用pip来安装和更新这个包:  
+`$ pip install -U lightning-server`
 ***
 ## 创建一个例子
 ```python
 # 把这段代码保存为example.py
 from lightning import Server
 
-server = Server(('', 80))
+server = Server()
 
 @server.bind('/')
 def hello(request):
