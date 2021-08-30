@@ -2,6 +2,10 @@ import socket
 from urllib.parse import unquote
 
 
+def format_header(header: str) -> str:
+    return '-'.join(map(lambda x: x.capitalize(), header.split('-')))
+
+
 def recv_request_line(conn: socket.socket) -> bytes:
     stack = b''
     while b'\r\n' not in stack:
@@ -38,8 +42,7 @@ def parse_req(content: bytes) -> dict:
     line, *head = content.decode().split('\r\n')
     method, uv = line.split(' ', 1)
     url, ver = uv.rsplit(' ', 1)
-    url = unquote(url)
-    path, param = url.split('?', 1) if '?' in url else [url, '']
+    path, param = unquote(url).split('?', 1) if '?' in url else [url, '']
     path = path + '/' if not path.endswith('/') else path
 
     keyword, arg = {}, set()
@@ -50,9 +53,12 @@ def parse_req(content: bytes) -> dict:
         else:
             arg.add(p)
 
-    header = dict(h.replace(' ', '').lower().split(':', 1) for h in head)  # "lower()" is for compatibility
+    header = {}
+    for h, v in (h.replace(' ', '').split(':', 1) for h in head):
+        header[format_header(h)] = v
+
     return {'method': method, 'url': path, 'keyword': keyword,
-            'arg': arg, 'version': ver, 'header': header, 'query': '?' + param}
+            'arg': arg, 'version': ver, 'header': header, 'query': '?' + param if param else ''}
 
 
 def shrink_string(s: str, max_len: int = 40):

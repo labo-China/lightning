@@ -158,14 +158,16 @@ class Request:
         return (line + header + '\r\n\r\n').encode()
 
     def get_overview(self) -> str:
-        ht = '\n'.join(': '.join((h, self.header[h])) for h in self.header)
-        pr = '\n'.join(f'{k[0]}: {k[1]}' for k in self.keyword.items()) + '\n' + '; '.join(self.arg)
+        """Return a human-readable information of request"""
+        ht = '\n    '.join(': '.join((h, self.header[h])) for h in self.header)
+        pr = ' '.join(f'{k[0]}:{k[1]}' for k in self.keyword.items())
         return f'<Request [{self.url}]> from {self.addr} {self.version}\n' \
                f'Method: {self.method}\n' \
                f'Headers: \n' \
                f'{ht}\n' \
-               f'Params:' \
-               f'{pr}'
+               f'Query:{self.query}\n' \
+               f'Params:{pr}\n' \
+               f'Args:{" ".join(self.arg)}\n'
 
     def __repr__(self) -> str:
         return f'Request[{self.method} -> {self.url}]'
@@ -213,7 +215,7 @@ class Response:
         return f'Response[{self.code}]'
 
     def __bool__(self) -> bool:
-        return self.code != 200 or self.content is not None
+        return self.code != 200 or self.content != b''
 
 
 InterfaceFunction = Callable[[Request], Optional[Union[Response, str]]]
@@ -264,7 +266,9 @@ class Interface:
         return resp
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        return False
+        if exc_tb:
+            traceback.print_tb(exc_tb)
+        return True
 
     def __repr__(self) -> str:
         return f'Interface[{self._function.__name__}]'
@@ -321,8 +325,8 @@ class WSGIInterface(Interface):
         environ['SCRIPT_NAME'] = request.url.removesuffix(request.path)
         environ['PATH_INFO'] = request.path.removeprefix('/')
         environ['QUERY_STRING'] = request.query
-        environ['CONTENT_TYPE'] = request.header.get('content-type') or ''
-        environ['CONTENT_LENGTH'] = request.header.get('content-length') or ''
+        environ['CONTENT_TYPE'] = request.header.get('Content-Type') or ''
+        environ['CONTENT_LENGTH'] = request.header.get('Content-Length') or ''
         environ['SERVER_NAME'], environ['SERVER_PORT'] = request.conn.getsockname()
         environ['SERVER_PROTOCOL'] = request.version
         map(lambda h: environ.update({f'HTTP_{h[0].upper()}': h[1]}), request.header.items())  # Set HTTP_xxx variables
@@ -344,9 +348,16 @@ class MethodInterface(Interface):
     def __init__(self, get: InterfaceFunction = None, head: InterfaceFunction = None, post: InterfaceFunction = None,
                  put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
                  options: InterfaceFunction = None, trace: InterfaceFunction = None, patch: InterfaceFunction = None,
-                 strict: bool = True, *args, **kwargs):
+                 limited: bool = True, *args, **kwargs):
+        """
+        :param limited: if it is True, there is no default values for "OPTION" and "HEAD" method
+         otherwise the default values are present
+        """
+        if not limited:
+            options = options or self.options_
+            head = head or self.head_
         self.methods = {'GET': get, 'HEAD': head, 'POST': post, 'PUT': put, 'DELETE': delete, 'CONNECT': connect,
-                        'OPTIONS': options or (self.options_ if strict else options), 'TRACE': trace, 'PATCH': patch}
+                        'OPTIONS': options, 'TRACE': trace, 'PATCH': patch}
         super().__init__(func = self.select, *args, **kwargs)
 
     def select(self, request: Request) -> Optional[Response]:
@@ -368,6 +379,16 @@ class MethodInterface(Interface):
         resp = Response(header = {'Allow': ','.join(avaliable_methods)})
         if request.header.get('Origin'):
             resp.header.update({'Access-Control-Allow-Origin': request.header['Origin']})
+        return resp
+
+    def head_(self, request: Request) -> Response:
+        """Default "HEAD" method implementation"""
+        get = self.methods['get']
+        if get:
+            resp = get(request)
+            resp.content = b''
+        else:
+            resp = Response(405)
         return resp
 
     def __repr__(self) -> str:
@@ -472,7 +493,7 @@ class Session:
         with self.interface as i:
             resp = i.process(self.request)
             logging.info(f'{i} processed successful with {resp}')
-            if resp:
+            if resp and not getattr(self.request.conn, '_closed'):
                 self.request.conn.sendall(resp.generate())
             self.request.conn.close()
         try:

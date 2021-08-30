@@ -25,7 +25,7 @@ class Server:
         self.worker_type = ThreadWorker if multi_status == 'thread' else ProcessWorker \
             if multi_status == 'process' else None  # DON`T use 'process'! It`s unavailable now.
         self.queue = self.worker_type.queue_type()
-        self.processor_list: List[Worker] = []
+        self.processor_list: set[Worker] = set()
 
         self.root_node = Node(default_interface = default)
         self.bind = self.root_node.bind
