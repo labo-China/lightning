@@ -180,4 +180,5 @@ class Folder(Node):
         return f'Folder[{self.path}]'
 
 
-__all__ = ['File', 'Folder', 'DefaultInterface']
+Empty = Interface(lambda: Response(204))
+__all__ = ['File', 'Folder', 'DefaultInterface', 'Empty']
