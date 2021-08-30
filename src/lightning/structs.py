@@ -17,6 +17,7 @@ from . import utility
 
 class HookedSocket(socket.socket):
     """An operateble socket class instead of native socket"""
+
     def __init__(self, sock: socket.socket, buffer: int = 1024):
         fd = sock.detach()
         super().__init__(fileno = fd)  # Rebuild a socket object from given socket as super object
@@ -229,7 +230,7 @@ class Interface:
                  post: list[Callable[[Request, Response], Response]] = None, strict: bool = False):
         """
         :param func: A function to handle requests
-        :param default_resp: HTTP content will be sent when the function meets expections
+        :param default_resp: the HTTP content be sent when the exception occoured
         :param strict: if it is True, the interface will catch exceed path in interfaces and return a 404 response
         :param pre: things to do before the function processes request, the result will cover the function
         :param post: things to do post the function processed request, they should return a Response object
@@ -267,7 +268,7 @@ class Interface:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_tb:
-            traceback.print_tb(exc_tb)
+            traceback.print_exception(exc_type, value = exc_val, tb = exc_tb)
         return True
 
     def __repr__(self) -> str:
@@ -545,5 +546,5 @@ class ProcessWorker(Worker, multiprocessing.Process):
         super().__init__(request_queue = request_queue, timeout = timeout)
 
 
-__all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket', 'Session', 'Worker',
-           'ThreadWorker', 'ProcessWorker', 'DefaultInterface', 'WSGIInterface']
+__all__ = ['Request', 'Response', 'Interface', 'StaticInterface', 'MethodInterface', 'Node', 'HookedSocket', 'Session',
+           'Worker', 'ThreadWorker', 'ProcessWorker', 'DefaultInterface', 'WSGIInterface']
