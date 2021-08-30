@@ -10,9 +10,9 @@ Install and update with pip:
 ## Create an Example
 ```python
 # save this as example.py
-from lightning import Server
+import lightning
 
-server = Server()
+server = lightning.Server()
 
 @server.bind('/')
 def hello(request):

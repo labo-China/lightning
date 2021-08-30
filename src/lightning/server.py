@@ -1,9 +1,9 @@
+import logging
 import socket
 import time
-from threading import Thread
 from ssl import SSLContext
-from typing import Tuple, List
-import logging
+from threading import Thread
+
 from . import utility, interfaces
 from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Session, Node, Request, Response
 
@@ -11,7 +11,7 @@ logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(me
 
 
 class Server:
-    def __init__(self, server_addr: Tuple[str, int] = ('', 80), max_listen: int = 100,
+    def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
                  timeout: int = None, default: Interface = interfaces.DefaultInterface, max_instance: int = 4,
                  multi_status: str = 'thread', ssl_cert: str = None,
                  conn_famliy: socket.AddressFamily = socket.AF_INET):
@@ -41,6 +41,10 @@ class Server:
         self._sock.listen(max_listen)
 
     def run(self, block: bool = True):
+        """
+        start the server\n
+        :param block: if it is True, this method will be blocked until the server shutdown or critical errors occoured
+        """
         self.is_running = True
         self._sock.settimeout(self.timeout)
         logging.info('Initraling request processor...')
@@ -59,6 +63,7 @@ class Server:
                     return
 
     def accept_request(self):
+        """Accept TCP requests from listening ports and forward it"""
         for p in self.processor_list:
             p.start()
         while self.is_running:
@@ -72,6 +77,11 @@ class Server:
         logging.info('Request listening stopped.')  # This should not appear in the terminal
 
     def handle_request(self, connection, address):
+        """
+        Construct an HTTP request object and put it into requests queue\n
+        :param connection: a socket object which is connected to HTTP Client
+        :param address: address of client socket
+        """
         try:
             request = Request(addr = address,
                               **utility.parse_req(utility.recv_request_head(connection)), conn = connection)
@@ -86,6 +96,10 @@ class Server:
             return
 
     def interrupt(self, timeout: float = None):
+        """
+        Stop the server temporarily. Use "run" method to start the server again.\n
+        :param timeout: max time for waiting single active session
+        """
         timeout = timeout or self.timeout or 30
         if self.is_running:
             self.is_running = False
@@ -103,6 +117,9 @@ class Server:
         return
 
     def terminate(self):
+        """
+        Stop the server permanently. After running this method, the server cannot start again.
+        """
         def _terminate(worker: Worker):
             if isinstance(worker, ProcessWorker):
                 worker.terminate()

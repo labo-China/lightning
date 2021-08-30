@@ -1,21 +1,22 @@
+import logging
+import multiprocessing
+import os
 import queue
 import socket
-import time
-import os
-from io import BytesIO
 import threading
-import multiprocessing
-import logging
-from ssl import SSLContext
+import time
+import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Union, Dict, Callable, List, Optional, Tuple, Generator, Iterable
+from io import BytesIO
+from ssl import SSLContext
+from typing import Union, Callable, Optional, Generator, Iterable
 
 from . import utility
 
 
 class HookedSocket(socket.socket):
-
+    """An operateble socket class instead of native socket"""
     def __init__(self, sock: socket.socket, buffer: int = 1024):
         fd = sock.detach()
         super().__init__(fileno = fd)  # Rebuild a socket object from given socket as super object
@@ -115,13 +116,13 @@ class HookedSocket(socket.socket):
 @dataclass
 class Request:
     """Request that recevived from the parser of server"""
-    addr: Tuple[str, int] = field(default = ('127.0.0.1', -1))
+    addr: tuple[str, int] = field(default = ('127.0.0.1', -1))
     method: str = field(default = 'GET')
     url: str = field(default = '/')
     version: str = field(default = 'HTTP/1.1')
-    keyword: Dict[str, str] = field(default_factory = dict)
+    keyword: dict[str, str] = field(default_factory = dict)
     arg: set = field(default_factory = set)
-    header: Dict[str, str] = field(default_factory = dict)
+    header: dict[str, str] = field(default_factory = dict)
     query: str = field(default = '')
     conn: socket.socket = None
     path: str = None
@@ -140,7 +141,7 @@ class Request:
     def iter_content(self, buffer: int = 1024) -> Generator[bytes, None, None]:
         """
         Get the content of the Request.\n
-        :param buffer: buffer size of content (if is_iter is True, or it will be ingored)
+        :param buffer: buffer size of content
         """
         content = True
         while content:
@@ -176,7 +177,7 @@ class Response:
     code: int = 200
     desc: str = None
     version: str = field(default = 'HTTP/1.1')
-    header: Dict[str, str] = field(default_factory = dict)
+    header: dict[str, str] = field(default_factory = dict)
     timestamp: Union[datetime, int] = int(time.time())
     content: Union[bytes, str] = b''
     encoding: str = 'utf-8'
@@ -194,7 +195,7 @@ class Response:
         self.header = {
                           'Content-Type': 'text/plain',
                           'Content-Length': str(len(self.content)),
-                          'Server': 'Lighting',
+                          'Server': 'Lightning',
                           'Date': self.timestamp.strftime('%a, %d %b %Y %H:%M:%S GMT')
                       } | self.header
         # Reset the content-type in header
@@ -222,8 +223,8 @@ class Interface:
     """The main HTTP server handler."""
 
     def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500),
-                 pre: List[Callable[[Request], Union[Request, Response, str, None]]] = None,
-                 post: List[Callable[[Request, Response], Response]] = None, strict: bool = False):
+                 pre: list[Callable[[Request], Union[Request, Response, str, None]]] = None,
+                 post: list[Callable[[Request, Response], Response]] = None, strict: bool = False):
         """
         :param func: A function to handle requests
         :param default_resp: HTTP content will be sent when the function meets expections
@@ -242,7 +243,7 @@ class Interface:
 
     def process(self, request: Request) -> Response:
         """
-        Let the function processes the request and returns the result
+        Let the function processes the request and returns the result\n
         :param request:  the request that will be processed
         """
         if self.strict and (request.path != '/'):
@@ -271,6 +272,9 @@ class Interface:
 
 class WSGIInterface(Interface):
     def __init__(self, application: Callable[[dict, Callable], Optional[Iterable[bytes]]], *args, **kwargs):
+        """
+        :param application: a callble object to run as a WSGI application
+        """
         # remove 'pre' and 'post' arguments, they are unusable in WSGI standards.
         self.app = application
         self.response: Response = Response()
@@ -295,7 +299,13 @@ class WSGIInterface(Interface):
             self.content_iter = ()
         return Response()  # Avoid interface to send response data
 
-    def start_response(self, status: str, header: List[Tuple[str, str]] = None, exc_info: tuple = None):
+    def start_response(self, status: str, header: list[tuple[str, str]] = None, exc_info: tuple = None):
+        """
+        Submit an HTTP response header, it will not be sent immediately.\n
+        :param status: HTTP status code and its description
+        :param header: HTTP headers like [(key1, value1), (key2, value2)]
+        :param exc_info: if an error occured, it is an exception tuple, otherwise it is None
+        """
         logging.info(f'start_response is called by {self.app.__name__}')
         if exc_info:
             raise exc_info[1].with_traceback(exc_info[2])
@@ -304,6 +314,7 @@ class WSGIInterface(Interface):
 
     @staticmethod
     def get_environ(request: Request) -> dict:
+        """Return a dict includes WSGI varibles from a request"""
         environ = {}
         environ.update(dict(os.environ))
         environ['REQUEST_METHOD'] = request.method.upper()
@@ -339,6 +350,7 @@ class MethodInterface(Interface):
         super().__init__(func = self.select, *args, **kwargs)
 
     def select(self, request: Request) -> Optional[Response]:
+        """Return a response which is produced by specified method in request"""
         if request.method in self.methods:
             method = self.methods.get(request.method)
             if method:
@@ -374,7 +386,7 @@ DefaultInterface = Interface(default)
 class Node(Interface):
     """An interface that provides a main-interface to carry sub-Interfaces."""
 
-    def __init__(self, interface_map: Union[Callable[[], Dict[str, Interface]], Dict[str, Interface]] = None,
+    def __init__(self, interface_map: Union[Callable[[], dict[str, Interface]], dict[str, Interface]] = None,
                  default_interface: Interface = DefaultInterface, default_resp: Response = Response(code = 500)):
         """
         :param interface_map: Initral mapping for interfaces
@@ -383,7 +395,7 @@ class Node(Interface):
         """
         super().__init__(self.select, default_resp)
         self._map = interface_map or {}
-        self._tree: Dict[str, Interface] = {}
+        self._tree: dict[str, Interface] = {}
         self.default_interface = default_interface
         self.recent_repr: str = ''
 
@@ -405,17 +417,17 @@ class Node(Interface):
         return target_interface.process(request)
 
     @property
-    def map(self) -> Dict[str, Interface]:
+    def map(self) -> dict[str, Interface]:
         """Return interface map as a dictonary"""
         return {**(self._map() if isinstance(self._map, Callable) else self._map), **self._tree}
 
-    def bind(self, pattern: str, interface_or_method: Union[Interface, List[str]] = None, *args, **kwargs):
+    def bind(self, pattern: str, interface_or_method: Union[Interface, list[str]] = None, *args, **kwargs):
         r"""
         Bind an interface or function into this node.
 
         :param pattern: the url prefix that used to match requests.
-        :param interface_or_method: If the function has been using as a normal function, the value is the Interface
-            needs to bind. If the function has been using as a decorator or the value is None, the value is expected
+        :param interface_or_method: If the function be used as a normal function, the value is the Interface
+            needs to bind. If the function be used as a decorator or the value is None, the value is expected
             HTTP methods list. If the value is None, it means the Interface has no limits on methods.
         """
         if not pattern.startswith('/'):
@@ -437,6 +449,7 @@ class Node(Interface):
             return decorator
 
     def _repr(self) -> str:
+        """Return the desciption of itself (this method should never be called)"""
         desc = "|".join(f"{x[0]}=>{x[1]}" for x in self.map.items())
         return f'Node[{utility.shrink_string(desc)}]'
 

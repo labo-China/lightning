@@ -4,8 +4,9 @@ import time
 from mimetypes import guess_type
 from os import listdir
 from os.path import getsize, basename, isdir, isfile
-from re import Pattern, match, compile
-from typing import Dict, List, Union, Callable, Iterable, Generator
+from re import Pattern
+from typing import Union, Callable, Iterable
+
 from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
 
 
@@ -86,7 +87,7 @@ class Folder(Node):
     @staticmethod
     def _convert_filter(obj: _FilterParam) -> Iterable[Callable[[str], bool]]:
         if isinstance(obj, str) or not hasattr(obj, '__iter__'):
-            obj: List[Folder.FilterType] = [obj]
+            obj: list[Folder.FilterType] = [obj]
 
         def convert(f: Folder.FilterType) -> Callable[[str], bool]:
             if isinstance(f, str):
@@ -118,7 +119,7 @@ class Folder(Node):
     def _filter(self, seq: Iterable[str]) -> Iterable[str]:
         return filter(self._is_passable, seq)
 
-    def load_file(self) -> Dict[str, Interface]:
+    def load_file(self) -> dict[str, Interface]:
         if self.file_depth == 0:
             return {}
         m = {}
@@ -138,7 +139,7 @@ class Folder(Node):
             return m
         return m
 
-    def get_map(self) -> Dict[str, Interface]:
+    def get_map(self) -> dict[str, Interface]:
         if not self._file_map or time.time() - self.last_update > self.update_time:
             self.update_map()
         return self._file_map
