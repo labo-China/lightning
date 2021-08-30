@@ -275,6 +275,17 @@ class Interface:
         return f'Interface[{self._function.__name__}]'
 
 
+class StaticInterface(Interface):
+    """An interface class that always returns a static response."""
+
+    def __init__(self, static_response: Optional[Response] = None, **kwargs):
+        self.response = Response(**kwargs) if static_response is None else static_response
+        super().__init__(lambda _: self.response)
+
+    def __repr__(self) -> str:
+        return f'StaticInterface[{self.response}]'
+
+
 class WSGIInterface(Interface):
     def __init__(self, application: Callable[[dict, Callable], Optional[Iterable[bytes]]], *args, **kwargs):
         """
