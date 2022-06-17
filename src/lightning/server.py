@@ -1,6 +1,7 @@
 import logging
 import socket
 import time
+import traceback
 from ssl import SSLContext
 from threading import Thread
 
@@ -29,7 +30,7 @@ class Server:
         """
         self.is_running = False
         self.listener = None
-        self.addr = server_addr
+        self.addr = sock.getsockname() if sock else server_addr
         self.timeout = timeout
         self.max_instance = max_instance
         self.max_listen = max_listen
@@ -42,15 +43,22 @@ class Server:
         self.root_node = Node(default_interface = default)
         self.bind = self.root_node.bind
 
-        self._sock = socket.socket(conn_famliy)
-        self._sock.settimeout(timeout)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if sock:
+            self._sock = sock
+        else:
+            self._sock = socket.socket(conn_famliy)
+            self._sock.settimeout(timeout)
+            if not self.check_port(server_addr[1]):
+                logging.critical(f'Address {server_addr} is in use!')
+                raise IOError(f'Address {server_addr} is in use.')
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._sock.bind(server_addr)
+            self._sock.listen(max_listen)
+
         if ssl_cert:
             ssl_context = SSLContext()
             ssl_context.load_cert_chain(ssl_cert)
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
-        self._sock.bind(server_addr)
-        self._sock.listen(max_listen)
 
     def run(self, block: bool = True):
         """
