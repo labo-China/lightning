@@ -11,10 +11,22 @@ logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(me
 
 
 class Server:
+    """The HTTP server class"""
     def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
                  timeout: int = None, default: Interface = interfaces.DefaultInterface, max_instance: int = 4,
                  multi_status: str = 'thread', ssl_cert: str = None,
-                 conn_famliy: socket.AddressFamily = socket.AF_INET):
+                 conn_famliy: socket.AddressFamily = socket.AF_INET, sock: socket.socket = None):
+        """
+        :param server_addr: the address of server (host, port)
+        :param max_listen: max size of listener queue
+        :param timeout: timeout for interrupting server
+        :param default: the default interface for root node (equals to self.root_node.default_interface)
+        :param max_instance: max size of processing queue
+        :param multi_status: specify if this server use single processing or mulit-thread processing
+        :param ssl_cert: SSL certificate content
+        :param conn_famliy: address format
+        :param sock: a given socket
+        """
         self.is_running = False
         self.listener = None
         self.addr = server_addr
@@ -88,6 +100,7 @@ class Server:
             session = Session(self.root_node, request)
             self.queue.put(session)
         except ValueError:
+            traceback.print_exc()
             try:
                 connection.sendall(Response(code = 400).generate())
             except (ConnectionAbortedError, ConnectionResetError):
@@ -106,14 +119,18 @@ class Server:
             for t in self.processor_list:
                 t.running_state = False
                 t.timeout = 0
+            logging.info(f'Pausing {self}')
             for t in self.processor_list:
                 logging.info(f'Waiting for active session {t.name}...')
                 t.join(timeout)
             self._sock.settimeout(0)
+        else:
+            logging.warning('The server is already stopped, pausing it will not take any effects.')
+            return
         if self.listener:
             logging.info('Waiting for connection listener...')
             self.listener.join(timeout)
-        logging.info('Server paused successful.')
+        logging.info(f'{self} paused successful.')
         return
 
     def terminate(self):
@@ -128,10 +145,14 @@ class Server:
 
         if self.is_running:
             self.is_running = False
+            logging.info(f'Terminating {self}')
             for t in self.processor_list:
                 logging.info(f'Terminating {t.name}...')
                 _terminate(t)
             self._sock.close()
+        else:
+            logging.warning('The server is already stopped, pausing it will not take any effects.')
+            return
         if self.listener.is_alive():
             logging.info('Terminating connection listener...')
             _terminate(self.listener)
