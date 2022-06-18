@@ -1,5 +1,6 @@
 import socket
 from urllib.parse import unquote
+from typing import Literal
 
 
 def format_header(header: str) -> str:
@@ -42,7 +43,9 @@ def parse_req(content: bytes) -> dict:
     line, *head = content.decode().split('\r\n')
     method, uv = line.split(' ', 1)
     url, ver = uv.rsplit(' ', 1)
-    path, param = unquote(url).split('?', 1) if '?' in url else [url, '']
+
+    url = unquote(url)
+    path, param = url.split('?', 1) if '?' in url else [url, '']
     path = path + '/' if not path.endswith('/') else path
 
     keyword, arg = {}, set()
@@ -124,5 +127,5 @@ HTTP_CODE = {
     510: "Not Extended",
     600: "Unparseable Response Headers"
 }
-
-__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'shrink_string']
+Method = Literal['get', 'post', 'put', 'delete', 'head', 'connect', 'trace', 'options']
+__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'shrink_string', 'Method']
