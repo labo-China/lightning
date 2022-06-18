@@ -212,6 +212,10 @@ class Response:
                f'{hd}\r\n\r\n'
         return text.encode(self.encoding) + self.content
 
+    def __call__(self, *args, **kwargs):
+        # provide a call method here so that Response object could act as a static Responsive object
+        return self
+
     def __repr__(self) -> str:
         return f'Response[{self.code}]'
 
@@ -219,30 +223,60 @@ class Response:
         return self.code != 200 or self.content != b''
 
 
-InterfaceFunction = Callable[[Request], Optional[Union[Response, str]]]
+Sendable = Union[Response, str, bytes, None]
+Responsive = Callable[[Request], Sendable]
+
+
+def create_response(obj: Sendable = None, **kwargs) -> Response:
+    if isinstance(obj, Response):
+        return obj
+    elif isinstance(obj, Union[str, bytes]):
+        return Response(content = obj, **kwargs)
+    else:
+        return Response(**kwargs)
 
 
 class Interface:
     """The main HTTP server handler."""
 
-    def __init__(self, func: InterfaceFunction, default_resp: Response = Response(code = 500),
-                 pre: list[Callable[[Request], Union[Request, Response, str, None]]] = None,
-                 post: list[Callable[[Request, Response], Response]] = None, strict: bool = False):
+    def __init__(self, get_or_method: Union[dict[Method, Responsive], Responsive] = None,
+                 generic: Responsive = Response(405), fallback: Responsive = Response(500),
+                 pre: list[Callable[[Request], Union[Request, Sendable]]] = None,
+                 post: list[Callable[[Request, Response], Sendable]] = None, strict: bool = False):
         """
-        :param func: A function to handle requests
-        :param default_resp: the HTTP content be sent when the exception occoured
-        :param strict: if it is True, the interface will catch exceed path in interfaces and return a 404 response
-        :param pre: things to do before the function processes request, the result will cover the function
-        :param post: things to do post the function processed request, they should return a Response object
+        :param get_or_method: a method-responsive-style dict, if a Responsive object is given, it will be GET handler
+        :param generic: default handler if no function is matched with method
+        :param strict: if it is True, the interface will catch extra path in interfaces and return a 404 response
+        :param pre: things to do before processing request, it will be sent as final response if a Response object is given
+        :param post: things to do after the function processed request, they should return a Response object
         """
-        self.default_resp = default_resp
-        self._function = func
-        self.strict = strict
+        if not get_or_method:
+            self.methods = None
+        elif isinstance(get_or_method, dict):
+            self.methods = get_or_method
+        else:
+            # assume it is a Responsive object
+            self.methods = {'get': get_or_method}
+        self.generic = generic
+        self.fallback = fallback
         self.pre = pre or []
         self.post = post or []
+        self.strict = strict
 
     def __enter__(self):
         return self
+
+    def _select_method(self, request: Request) -> Sendable:
+        """Return a response which is produced by specified method in request"""
+        method = request.method.lower()
+        if method not in Method.__args__:
+            return Response(400)  # incorrect request method
+
+        handler = self.methods[method]
+        if handler:
+            return handler(request)
+        else:
+            return self.generic(request)
 
     def process(self, request: Request) -> Response:
         """
@@ -251,20 +285,36 @@ class Interface:
         """
         if self.strict and (request.path != '/'):
             return Response(404)
-        for p in self.pre:
-            res = p(request)
+
+        for pre in self.pre:
+            res = pre(request)
             if isinstance(res, Request):
                 request = res
-            elif isinstance(res, Response):
-                return res
-            elif isinstance(res, str):
-                return Response(content = res)
-        resp = self._function(request) or Response()
-        if isinstance(resp, str):
-            resp = Response(content = resp)
-        for a in self.post:
-            resp = a(request, resp)
+            elif isinstance(res, Sendable):
+                return create_response(res)
+
+        resp = create_response(self._select_method(request))
+        for pst in self.post:
+            resp = create_response(pst(request, resp))
         return resp
+
+    def options_(self, request: Request) -> Response:
+        """Default "OPTIONS" method implementation"""
+        resp = Response(header = {'Allow': ','.join(self.methods.keys())})
+        if request.header.get('Origin'):
+            resp.header.update({'Access-Control-Allow-Origin': request.header['Origin']})
+        return resp
+
+    def head_(self, request: Request) -> Response:
+        """Default "HEAD" method implementation"""
+        if 'get' not in self.methods:
+            return Response(405)
+        resp = create_response(self.methods['get'](request))
+        resp.content = b''
+        return resp
+
+    def __call__(self, *args, **kwargs):
+        return self.process(*args, **kwargs)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_tb:
@@ -272,18 +322,13 @@ class Interface:
         return True
 
     def __repr__(self) -> str:
-        return f'Interface[{self._function.__name__}]'
+        if not self.methods:
+            return f'Interface[{self.generic.__name__}]'
 
-
-class StaticInterface(Interface):
-    """An interface class that always returns a static response."""
-
-    def __init__(self, static_response: Optional[Response] = None, **kwargs):
-        self.response = Response(**kwargs) if static_response is None else static_response
-        super().__init__(lambda _: self.response)
-
-    def __repr__(self) -> str:
-        return f'StaticInterface[{self.response}]'
+        method_map = []
+        for method, func in self.methods.items():
+            method_map.append(method.upper() + ':' + func.__name__)
+        return f'Interface[{"|".join(method_map)}]'
 
 
 class WSGIInterface(Interface):
@@ -296,7 +341,7 @@ class WSGIInterface(Interface):
         self.response: Response = Response()
         self.content_iter: Iterable = ()
         kwargs.update({'pre': None, 'post': None})
-        super().__init__(func = self.call, *args, **kwargs)
+        super().__init__(self.call, *args, **kwargs)
 
     def call(self, request: Request) -> Response:
         resp = self.app(self.get_environ(request), self.start_response)
@@ -366,13 +411,13 @@ class Node(Interface):
     """An interface that provides a main-interface to carry sub-Interfaces."""
 
     def __init__(self, interface_map: Union[Callable[[], dict[str, Interface]], dict[str, Interface]] = None,
-                 default_interface: Interface = DefaultInterface, default_resp: Response = Response(code = 500)):
+                 default_interface: Interface = DefaultInterface, fallback: Response = Response(code = 500)):
         """
         :param interface_map: Initral mapping for interfaces
         :param default_interface: a special interface that actives when no interface be matched
-        :param default_resp: HTTP content will be sent when the function meets expections
+        :param fallback: HTTP content will be sent when the function meets expections
         """
-        super().__init__(self.select, default_resp)
+        super().__init__(self.select, fallback = fallback)
         self._map = interface_map or {}
         self._tree: dict[str, Interface] = {}
         self.default_interface = default_interface
@@ -422,7 +467,7 @@ class Node(Interface):
                     parameter = dict(zip(method_list, [func] * len(method_list)))  # prepare the parameter for interface
                     self.bind(pattern, MethodInterface(*args, **parameter, **kwargs))
                 else:
-                    self.bind(pattern, Interface(func = func, *args, **kwargs))
+                    self.bind(pattern, Interface(func, *args, **kwargs))
                 return func
 
             return decorator
@@ -455,7 +500,7 @@ class Session:
                 self.request.conn.sendall(resp.generate())
             self.request.conn.close()
         try:
-            self.request.conn.sendall(self.interface.default_resp.generate())
+            self.request.conn.sendall(self.interface.fallback(self.request).generate())
         except OSError:
             pass  # interface processed successful
         finally:
@@ -503,5 +548,5 @@ class ProcessWorker(Worker, multiprocessing.Process):
         super().__init__(request_queue = request_queue, timeout = timeout)
 
 
-__all__ = ['Request', 'Response', 'Interface', 'StaticInterface', 'MethodInterface', 'Node', 'HookedSocket', 'Session',
+__all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket', 'Session',
            'Worker', 'ThreadWorker', 'ProcessWorker', 'DefaultInterface', 'WSGIInterface']
