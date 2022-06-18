@@ -31,7 +31,6 @@ class Server:
         self.is_running = False
         self.listener = None
         self.addr = sock.getsockname() if sock else server_addr
-        self.timeout = timeout
         self.max_instance = max_instance
         self.max_listen = max_listen
 
@@ -66,12 +65,11 @@ class Server:
         :param block: if it is True, this method will be blocked until the server shutdown or critical errors occoured
         """
         self.is_running = True
-        self._sock.settimeout(self.timeout)
-        logging.info('Initraling request processor...')
+        logging.info('Creating request processors...')
         self.processor_list = [self.worker_type(self.queue) for _ in range(self.max_instance)]
         logging.info(f'Listening request on {self.addr}')
         self.listener = Thread(target = self.accept_request)
-        self.listener.setDaemon(True)
+        self.listener.daemon = True
         self.listener.start()
         print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
         if block:
@@ -116,12 +114,20 @@ class Server:
         except (socket.timeout, ConnectionResetError):
             return
 
+    @staticmethod
+    def check_port(port):
+        """Test if a port is available to run a server"""
+        sock = socket.socket()
+        code = sock.connect_ex(('127.0.0.1', port))
+        sock.close()
+        return code != 0
+
     def interrupt(self, timeout: float = None):
         """
         Stop the server temporarily. Use "run" method to start the server again.\n
         :param timeout: max time for waiting single active session
         """
-        timeout = timeout or self.timeout or 30
+        timeout = timeout or 30
         if self.is_running:
             self.is_running = False
             for t in self.processor_list:
@@ -152,19 +158,19 @@ class Server:
                 worker.join(0)
 
         if self.is_running:
-            self.is_running = False
             logging.info(f'Terminating {self}')
+            self.is_running = False
             for t in self.processor_list:
                 logging.info(f'Terminating {t.name}...')
                 _terminate(t)
             self._sock.close()
         else:
-            logging.warning('The server is already stopped, pausing it will not take any effects.')
+            logging.warning('The server is already stopped.')
             return
         if self.listener.is_alive():
             logging.info('Terminating connection listener...')
             _terminate(self.listener)
-        logging.info('Server closed successful.')
+        logging.info(f'{self} closed successful.')
 
     def __enter__(self):
         self.run(block = False)
