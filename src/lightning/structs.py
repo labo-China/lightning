@@ -1,6 +1,5 @@
 import logging
 import multiprocessing
-import os
 import queue
 import socket
 import threading
@@ -12,6 +11,7 @@ from io import BytesIO
 from ssl import SSLContext
 from typing import Union, Callable, Optional, Generator, Iterable
 
+from .utility import Method
 from . import utility
 
 
@@ -118,7 +118,7 @@ class HookedSocket(socket.socket):
 class Request:
     """Request that recevived from the parser of server"""
     addr: tuple[str, int] = field(default = ('127.0.0.1', -1))
-    method: str = field(default = 'GET')
+    method: Method = field(default = 'GET')
     url: str = field(default = '/')
     version: str = field(default = 'HTTP/1.1')
     keyword: dict[str, str] = field(default_factory = dict)
@@ -354,61 +354,7 @@ class WSGIInterface(Interface):
         return f'WSGIInterface[{self.app.__name__}]'
 
 
-class MethodInterface(Interface):
-    """An interface class that supports specify interfaces by method"""
-
-    def __init__(self, get: InterfaceFunction = None, head: InterfaceFunction = None, post: InterfaceFunction = None,
-                 put: InterfaceFunction = None, delete: InterfaceFunction = None, connect: InterfaceFunction = None,
-                 options: InterfaceFunction = None, trace: InterfaceFunction = None, patch: InterfaceFunction = None,
-                 limited: bool = True, *args, **kwargs):
-        """
-        :param limited: if it is True, there is no default values for "OPTION" and "HEAD" method
-         otherwise the default values are present
-        """
-        if not limited:
-            options = options or self.options_
-            head = head or self.head_
-        self.methods = {'GET': get, 'HEAD': head, 'POST': post, 'PUT': put, 'DELETE': delete, 'CONNECT': connect,
-                        'OPTIONS': options, 'TRACE': trace, 'PATCH': patch}
-        super().__init__(func = self.select, *args, **kwargs)
-
-    def select(self, request: Request) -> Optional[Response]:
-        """Return a response which is produced by specified method in request"""
-        if request.method in self.methods:
-            method = self.methods.get(request.method)
-            if method:
-                return method(request)
-            else:
-                return Response(405)  # disallowed request method
-        else:
-            return Response(400)  # incorrect request method
-
-    def options_(self, request: Request) -> Response:
-        """Default "OPTIONS" method implementation"""
-        method_set = {self.get, self.head, self.post, self.put, self.delete,
-                      self.connect, self.options, self.trace, self.patch}
-        avaliable_methods = map(lambda x: x.__name__.upper(), filter(lambda x: bool(x), method_set))
-        resp = Response(header = {'Allow': ','.join(avaliable_methods)})
-        if request.header.get('Origin'):
-            resp.header.update({'Access-Control-Allow-Origin': request.header['Origin']})
-        return resp
-
-    def head_(self, request: Request) -> Response:
-        """Default "HEAD" method implementation"""
-        get = self.methods['get']
-        if get:
-            resp = get(request)
-            resp.content = b''
-        else:
-            resp = Response(405)
-        return resp
-
-    def __repr__(self) -> str:
-        desc = "|".join(f"{m[0]}=>{m[1].__name__}" for m in self.methods.items() if m[1])
-        return f'Interface[{utility.shrink_string(desc)}]'
-
-
-# for compatibility of multi-processing
+# for compatibility of multiprocessing
 def default(request: Request) -> Response:
     return Response(content = request.get_overview())
 
@@ -545,7 +491,7 @@ class ThreadWorker(Worker, threading.Thread):
 
     def __init__(self, request_queue: queue.Queue, timeout: float = 30):
         super().__init__(request_queue = request_queue, timeout = timeout)
-        self.setDaemon(True)
+        self.daemon = True
 
 
 class ProcessWorker(Worker, multiprocessing.Process):
