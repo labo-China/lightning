@@ -143,16 +143,19 @@ class Interface:
     def __init__(self, get_or_method: Union[dict[Method, Responsive], Responsive] = None,
                  generic: Responsive = Response(405), fallback: Responsive = Response(500),
                  pre: list[Callable[[Request], Union[Request, Sendable]]] = None,
-                 post: list[Callable[[Request, Response], Sendable]] = None, strict: bool = False):
-        """
+                 post: list[Callable[[Request, Response], Sendable]] = None,
+                 desc: str = None, strict: bool = False):
+        r"""
         :param get_or_method: a method-responsive-style dict, if a Responsive object is given, it will be GET handler
         :param generic: default handler if no function is matched with method
         :param strict: if it is True, the interface will catch extra path in interfaces and return a 404 response
-        :param pre: things to do before processing request, it will be sent as final response if a Response object is given
+        :param desc: description about the interface. It will show instead of default message when calling __repr__
+        :param pre: things to do before processing request, it will be sent as final response
+        if a Response object is given
         :param post: things to do after the function processed request, they should return a Response object
         """
         if not get_or_method:
-            self.methods = None
+            self.methods = {}
         elif isinstance(get_or_method, dict):
             self.methods = get_or_method
         else:
@@ -163,6 +166,7 @@ class Interface:
         self.fallback = fallback
         self.pre = pre or []
         self.post = post or []
+        self.desc = desc
         self.strict = strict
 
     def __enter__(self):
@@ -174,7 +178,7 @@ class Interface:
         if method not in Method.__args__:
             return Response(400)  # incorrect request method
 
-        handler = self.methods[method]
+        handler = self.methods.get(method)
         if handler:
             return handler(request)
         else:
@@ -224,13 +228,21 @@ class Interface:
         return True
 
     def __repr__(self) -> str:
+        def name(obj):
+            if hasattr(obj, '__name__'):
+                return obj.__name__
+            return str(obj)
+
+        template = self.__class__.__name__ + '[{}]'
+        if self.desc:
+            return template.format(self.desc)
         if not self.methods:
-            return f'Interface[{self.generic.__name__}]'
+            return template.format(name(self.generic))
 
         method_map = []
         for method, func in self.methods.items():
-            method_map.append(method.upper() + ':' + func.__name__)
-        return f'Interface[{"|".join(method_map)}]'
+            method_map.append(method.upper() + ':' + name(func))
+        return template.format('|'.join(method_map))
 
 
 class WSGIInterface(Interface):
