@@ -213,7 +213,7 @@ class Interface:
 
     def head_(self, request: Request) -> Response:
         """Default "HEAD" method implementation"""
-        if 'get' not in self.methods:
+        if 'GET' not in self.methods:
             return Response(405)
         resp = create_response(self.methods['GET'](request))
         resp.content = b''
@@ -225,7 +225,7 @@ class Interface:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_tb:
             traceback.print_exception(exc_type, value = exc_val, tb = exc_tb)
-        return True
+        return False
 
     def __repr__(self) -> str:
         def name(obj):
