@@ -47,9 +47,6 @@ class Server:
         else:
             self._sock = socket.socket(conn_famliy)
             self._sock.settimeout(timeout)
-            if not self.check_port(server_addr[1]):
-                logging.critical(f'Address {server_addr} is in use!')
-                raise IOError(f'Address {server_addr} is in use.')
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.bind(server_addr)
             self._sock.listen(max_listen)
@@ -113,14 +110,6 @@ class Server:
                 pass
         except (socket.timeout, ConnectionResetError):
             return
-
-    @staticmethod
-    def check_port(port):
-        """Test if a port is available to run a server"""
-        sock = socket.socket()
-        code = sock.connect_ex(('127.0.0.1', port))
-        sock.close()
-        return code != 0
 
     def interrupt(self, timeout: float = None):
         """
