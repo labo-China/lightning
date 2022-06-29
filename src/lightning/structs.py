@@ -225,7 +225,7 @@ class Interface:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_tb:
             traceback.print_exception(exc_type, value = exc_val, tb = exc_tb)
-        return False
+        return True
 
     def __repr__(self) -> str:
         def name(obj):
@@ -314,89 +314,85 @@ class WSGIInterface(Interface):
 
 
 # for compatibility of multiprocessing
-def default(request: Request) -> Response:
+def default_resp(request: Request) -> Response:
     return Response(content = request.get_overview())
 
 
-DefaultInterface = Interface(default)
+DefaultInterface = Interface(default_resp)
 
 
 class Node(Interface):
     """An interface that provides a main-interface to carry sub-Interfaces."""
 
-    def __init__(self, interface_map: Union[Callable[[], dict[str, Interface]], dict[str, Interface]] = None,
-                 default_interface: Interface = DefaultInterface, fallback: Response = Response(code = 500)):
+    def __init__(self, interface_map: dict[str, Interface] = None,
+                 interface_callback: Callable[[], dict[str, Interface]] = None,
+                 default: Interface = DefaultInterface, *args, **kwargs):
         """
         :param interface_map: Initral mapping for interfaces
-        :param default_interface: a special interface that actives when no interface be matched
-        :param fallback: HTTP content will be sent when the function meets expections
+        :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
+        :param default: the final interface when no interfaces were matched
         """
-        super().__init__(self.select, fallback = fallback)
-        self._map = interface_map or {}
-        self._tree: dict[str, Interface] = {}
-        self.default_interface = default_interface
-        self.recent_repr: str = ''
+        super().__init__(generic = self.select, *args, **kwargs)
+        self.map_static: dict[str, Interface] = interface_map or {}
+        self.map_callback = interface_callback
+        self.default = default
+        self.last_call: str = ''
 
     def select(self, request: Request) -> Response:
         """Select the matched interface and let it process requests"""
-        interface_map = self.map
-        self.recent_repr = ''
-        for interface in sorted(interface_map):
-            if request.path.startswith(interface + '/') or request.path == interface:
-                target_interface = interface_map[interface]
-                path = interface
+        interface_map = self.get_map()
+        for req_path in sorted(interface_map):
+            if request.path.startswith(req_path + '/') or request.path == req_path:
+                target = interface_map[req_path]
+                path = req_path
                 break
         else:
-            target_interface = self.default_interface
+            target = self.default
             path = request.url
         # process 'path'
         request.path = request.path.removeprefix(path)
-        self.recent_repr = repr(target_interface)
-        return target_interface.process(request)
+        self.last_call = repr(target)
+        return target.process(request)
 
-    @property
-    def map(self) -> dict[str, Interface]:
+    def get_map(self) -> dict[str, Interface]:
         """Return interface map as a dictonary"""
-        return {**(self._map() if isinstance(self._map, Callable) else self._map), **self._tree}
+        if not self.map_callback:
+            return self.map_static
+        return dict({**self.map_static, **self.map_callback()})
 
-    def bind(self, pattern: str, interface_or_method: Union[Interface, list[str]] = None, *args, **kwargs):
+    def bind(self, pattern: str, interface_or_method: Union[Interface, list[Method]] = None, *args, **kwargs):
         r"""
         Bind an interface or function into this node.
 
         :param pattern: the url prefix that used to match requests.
-        :param interface_or_method: If the function be used as a normal function, the value is the Interface
-            needs to bind. If the function be used as a decorator or the value is None, the value is expected
-            HTTP methods list. If the value is None, it means the Interface has no limits on methods.
+        :param interface_or_method: If the function is called as a normal function, the value is the Interface
+            needs to bind. If the function is called as a decorator or the value is None, the value is expected
+            HTTP methods list. If the value is None, it means the Interface will be a GET handler by default.
         """
         if not pattern.startswith('/'):
             pattern = '/' + pattern
-        if isinstance(interface_or_method, Interface):
-            self._tree[pattern] = interface_or_method
+
+        if isinstance(interface_or_method, Interface):  # called as a normal function
+            self.map_static[pattern] = interface_or_method
             logging.info(f'{interface_or_method} is bind on {pattern}')
             return
-        else:
-            def decorator(func):
-                if isinstance(interface_or_method, list) and interface_or_method is not None:
-                    method_list = set(map(lambda x: x.lower(), interface_or_method))  # convert mothod list to lowercase
-                    parameter = dict(zip(method_list, [func] * len(method_list)))  # prepare the parameter for interface
-                    self.bind(pattern, MethodInterface(*args, **parameter, **kwargs))
-                else:
-                    self.bind(pattern, Interface(func, *args, **kwargs))
-                return func
 
-            return decorator
+        def decorator(func):  # called as a decorator
+            if interface_or_method is not None:
+                parameter = dict.fromkeys(interface_or_method, func)
+                self.bind(pattern, Interface(get_or_method = parameter, *args, **kwargs))
+            else:
+                self.bind(pattern, Interface(func, *args, **kwargs))
+            return func  # return the given function to keep it
 
-    def _repr(self) -> str:
-        """Return the desciption of itself (this method should never be called)"""
-        desc = "|".join(f"{x[0]}=>{x[1]}" for x in self.map.items())
-        return f'Node[{utility.shrink_string(desc)}]'
+        return decorator
 
     def __repr__(self) -> str:
-        if self.recent_repr:
-            ret = self.recent_repr
-            self.recent_repr = ''
+        if self.last_call:
+            ret = self.last_call
+            self.last_call = ''
         else:
-            ret = self._repr()
+            ret = super().__repr__()
         return ret
 
 
@@ -462,5 +458,5 @@ class ProcessWorker(Worker, multiprocessing.Process):
         super().__init__(request_queue = request_queue, timeout = timeout)
 
 
-__all__ = ['Request', 'Response', 'Interface', 'MethodInterface', 'Node', 'HookedSocket', 'Session',
+__all__ = ['Request', 'Response', 'Interface', 'Node', 'Session',
            'Worker', 'ThreadWorker', 'ProcessWorker', 'DefaultInterface', 'WSGIInterface']

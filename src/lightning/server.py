@@ -39,7 +39,7 @@ class Server:
         self.queue = self.worker_type.queue_type()
         self.processor_list: set[Worker] = set()
 
-        self.root_node = Node(default_interface = default)
+        self.root_node = Node(default = default)
         self.bind = self.root_node.bind
 
         if sock:
@@ -63,7 +63,7 @@ class Server:
         """
         self.is_running = True
         logging.info('Creating request processors...')
-        self.processor_list = [self.worker_type(self.queue) for _ in range(self.max_instance)]
+        self.processor_list = set(self.worker_type(self.queue) for _ in range(self.max_instance))
         logging.info(f'Listening request on {self.addr}')
         self.listener = Thread(target = self.accept_request)
         self.listener.daemon = True
