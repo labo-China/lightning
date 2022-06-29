@@ -256,7 +256,8 @@ class Interface:
             self.methods = get_or_method
         else:
             # assume it is a Responsive object
-            self.methods = {'get': get_or_method}
+            self.methods = {'GET': get_or_method}
+        self.methods: dict[Method, Responsive] = self.methods  # correct type suggestion mistakes caused by some IDEs
         self.generic = generic
         self.fallback = fallback
         self.pre = pre or []
@@ -268,7 +269,7 @@ class Interface:
 
     def _select_method(self, request: Request) -> Sendable:
         """Return a response which is produced by specified method in request"""
-        method = request.method.lower()
+        method = request.method
         if method not in Method.__args__:
             return Response(400)  # incorrect request method
 
@@ -309,7 +310,7 @@ class Interface:
         """Default "HEAD" method implementation"""
         if 'get' not in self.methods:
             return Response(405)
-        resp = create_response(self.methods['get'](request))
+        resp = create_response(self.methods['GET'](request))
         resp.content = b''
         return resp
 
