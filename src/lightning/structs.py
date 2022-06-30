@@ -7,7 +7,6 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from io import BytesIO
 from ssl import SSLContext
 from typing import Union, Callable, Optional, Generator, Iterable
 
@@ -387,7 +386,8 @@ class Session:
             resp = i.process(self.request)
             logging.info(f'{i} processed successful with {resp}')
             if resp and not getattr(self.request.conn, '_closed'):
-                self.request.conn.sendall(resp.generate())
+                resp_data = resp.generate()
+                self.request.conn.sendall(resp_data)
             self.request.conn.close()
         try:
             self.request.conn.sendall(self.interface.fallback(self.request).generate())

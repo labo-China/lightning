@@ -116,11 +116,11 @@ class Server:
         """
         timeout = timeout or 30
         if self.is_running:
+            logging.info(f'Pausing {self}')
             self.is_running = False
             for t in self.processor_list:
                 t.running_state = False
                 t.timeout = 0
-            logging.info(f'Pausing {self}')
             for t in self.processor_list:
                 logging.info(f'Waiting for active session {t.name}...')
                 t.join(timeout)
