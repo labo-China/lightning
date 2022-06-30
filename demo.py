@@ -1,5 +1,4 @@
-from src.lightning import Request, Response, Server, Folder
-
+from src.lightning import Request, Response, Server, StorageView
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
@@ -13,12 +12,17 @@ def hello_world(request: Request) -> Response:
     return Response(content = s)  # this response is sended by Respose class
 
 
-@a.bind('/raw_test', ['get', 'post'])
+@a.bind('/raw_test', ['GET', 'POST'])
 def raw_hello(request: Request):
     s = f'hello world! from {request.addr}'
     request.conn.sendall(Response(content = s).generate())  # this response is sended by base socket function
 
 
-a.bind('/dl', Folder('C:/'))
+@a.bind('/crash')
+def crash(request: Request):
+    return str(1 / 0) + request.path
+
+
+a.bind('/storage', StorageView('C:/'))
 if __name__ == '__main__':
     a.run()
