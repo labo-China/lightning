@@ -1,16 +1,13 @@
-import logging
-import re
-import time
+import fnmatch
+import pathlib
 from mimetypes import guess_type
-from os import listdir
-from os.path import getsize, basename, isdir, isfile
-from re import Pattern
-from typing import Union, Callable, Iterable
+from os.path import getsize, basename
+from os import scandir
 
-from .structs import Interface, Response, Request, MethodInterface, Node, DefaultInterface
+from .structs import Interface, Response, Request
 
 
-class File(MethodInterface):
+class File(Interface):
     """The file interface"""
 
     def __init__(self, path: str, filename: str = None, range_support: bool = True, updateble: bool = False):
@@ -19,7 +16,7 @@ class File(MethodInterface):
         self.update = updateble
         self.filename = filename or basename(path)
         self.filesize = getsize(self.path)
-        super().__init__(get = self.download)
+        super().__init__(self.download, desc = path)
 
     def download(self, request: Request):
         try:
