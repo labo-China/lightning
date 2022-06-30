@@ -119,22 +119,21 @@ class StorageView(Interface):
             content += f'<a href="{request.url + y}">{y}</a>\n'
         return content + '</pre></body></html>'
 
-    def default(self, request: Request) -> Response:
-        if self.status:
-            return Response(code = self.status)
-        request.path = request.path.removesuffix('/')
-        f = self.map
-        if request.path:
-            for x in request.path.removeprefix('/').split('/'):
-                if x in f:
-                    f = f[x]
-                else:
-                    return Response(code = 404)
-        return Response(content = self.generate_default(request, f), header = {'Content-Type': 'text/html'})
 
-    def __repr__(self) -> str:
-        return f'Folder[{self.path}]'
+def _debug(request: Request) -> Response:
+    """Return a human-readable information of request"""
+    ht = '\n    '.join(': '.join((h, request.header[h])) for h in request.header)
+    pr = ' '.join(f'{k[0]}:{k[1]}' for k in request.keyword.items())
+    content = f'<Request [{request.url}]> from {request.addr} {request.version}\n' \
+              f'Method: {request.method}\n' \
+              f'Headers: \n' \
+              f'{ht}\n' \
+              f'Query:{request.query}\n' \
+              f'Params:{pr}\n' \
+              f'Args:{" ".join(request.arg)}\n'
+    return Response(content = content)
 
 
+Debug = Interface(generic = _debug)
 Empty = Interface(lambda: Response(204))
-__all__ = ['File', 'Folder', 'DefaultInterface', 'Empty']
+__all__ = ['File', 'StorageView', 'Debug', 'Empty']

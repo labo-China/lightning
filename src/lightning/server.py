@@ -14,14 +14,12 @@ logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(me
 class Server:
     """The HTTP server class"""
     def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
-                 timeout: int = None, default: Interface = interfaces.DefaultInterface, max_instance: int = 4,
-                 multi_status: str = 'thread', ssl_cert: str = None,
-                 conn_famliy: socket.AddressFamily = socket.AF_INET, sock: socket.socket = None):
+                 timeout: int = None, max_instance: int = 4, multi_status: str = 'thread', ssl_cert: str = None,
+                 conn_famliy: socket.AddressFamily = socket.AF_INET, sock: socket.socket = None, *args, **kwargs):
         """
         :param server_addr: the address of server (host, port)
         :param max_listen: max size of listener queue
         :param timeout: timeout for interrupting server
-        :param default: the default interface for root node (equals to self.root_node.default_interface)
         :param max_instance: max size of processing queue
         :param multi_status: specify if this server use single processing or mulit-thread processing
         :param ssl_cert: SSL certificate content
@@ -39,7 +37,7 @@ class Server:
         self.queue = self.worker_type.queue_type()
         self.processor_list: set[Worker] = set()
 
-        self.root_node = Node(default = default)
+        self.root_node = Node(*args, **kwargs)
         self.bind = self.root_node.bind
 
         if sock:

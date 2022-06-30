@@ -59,18 +59,6 @@ class Request:
         header = '\r\n'.join([f'{k}:{self.header[k]}' for k in self.header.keys()])
         return (line + header + '\r\n\r\n').encode()
 
-    def get_overview(self) -> str:
-        """Return a human-readable information of request"""
-        ht = '\n    '.join(': '.join((h, self.header[h])) for h in self.header)
-        pr = ' '.join(f'{k[0]}:{k[1]}' for k in self.keyword.items())
-        return f'<Request [{self.url}]> from {self.addr} {self.version}\n' \
-               f'Method: {self.method}\n' \
-               f'Headers: \n' \
-               f'{ht}\n' \
-               f'Query:{self.query}\n' \
-               f'Params:{pr}\n' \
-               f'Args:{" ".join(self.arg)}\n'
-
     def __repr__(self) -> str:
         return f'Request[{self.method} -> {self.url}]'
 
@@ -313,20 +301,12 @@ class WSGIInterface(Interface):
         return f'WSGIInterface[{self.app.__name__}]'
 
 
-# for compatibility of multiprocessing
-def default_resp(request: Request) -> Response:
-    return Response(content = request.get_overview())
-
-
-DefaultInterface = Interface(default_resp)
-
-
 class Node(Interface):
     """An interface that provides a main-interface to carry sub-Interfaces."""
 
     def __init__(self, interface_map: dict[str, Interface] = None,
                  interface_callback: Callable[[], dict[str, Interface]] = None,
-                 default: Interface = DefaultInterface, *args, **kwargs):
+                 default: Responsive = Response(404), *args, **kwargs):
         """
         :param interface_map: Initral mapping for interfaces
         :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
@@ -352,7 +332,7 @@ class Node(Interface):
         # process 'path'
         request.path = request.path.removeprefix(path)
         self.last_call = repr(target)
-        return target.process(request)
+        return target(request)
 
     def get_map(self) -> dict[str, Interface]:
         """Return interface map as a dictonary"""
@@ -459,4 +439,4 @@ class ProcessWorker(Worker, multiprocessing.Process):
 
 
 __all__ = ['Request', 'Response', 'Interface', 'Node', 'Session',
-           'Worker', 'ThreadWorker', 'ProcessWorker', 'DefaultInterface', 'WSGIInterface']
+           'Worker', 'ThreadWorker', 'ProcessWorker', 'WSGIInterface']
