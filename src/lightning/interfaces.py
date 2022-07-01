@@ -74,8 +74,16 @@ class StorageView(Interface):
                 return Response(403)
 
         path = self.root.joinpath(request.path)
+        # check some condtitions
         if not path.exists():
             return Response(404)
+        if path.is_symlink():
+            parents = path.parents
+            path = path.resolve()
+            if not (self.allow_exceed_links or self.root in parents):
+                return Response(403)
+        if not self.test_accessibility(path):
+            return Response(403)
 
         if path.is_file():
             file = File(str(path))
@@ -85,12 +93,18 @@ class StorageView(Interface):
                 return Response(content = self.render(request, path), header = {'Content-Type': 'text/html'})
             else:
                 return Response(403)
-        elif path.is_symlink():
-            resolved = path.resolve()
-            if (not self.allow_exceed_links) or self.root in resolved.parents:
-                pass
-            else:
-                return Response(403)
+
+    @staticmethod
+    def test_accessibility(path: pathlib.Path) -> bool:
+        try:
+            if path.is_file():
+                open(path, 'rb').close()
+            elif path.is_dir():
+                scandir(path)
+        except PermissionError:
+            return False
+        else:
+            return True
 
     def get_fd_set(self, path: pathlib.Path):
         folder, file = set(), set()
