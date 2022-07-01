@@ -2,7 +2,7 @@ import fnmatch
 import pathlib
 from mimetypes import guess_type
 from os.path import getsize, basename
-from os import scandir
+from os import scandir, DirEntry
 
 from .structs import Interface, Response, Request
 
@@ -94,7 +94,7 @@ class StorageView(Interface):
 
     def get_fd_set(self, path: pathlib.Path):
         folder, file = set(), set()
-        fd: os.DirEntry
+        fd: DirEntry
         for fd in scandir(path):
             name = basename(fd.path.removesuffix('/'))
             if fd.is_dir():
