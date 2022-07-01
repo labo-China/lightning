@@ -1,4 +1,4 @@
-from src.lightning import Request, Response, Server, StorageView
+from src.lightning import Request, Response, Server, StorageView, Debug
 
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
@@ -24,5 +24,6 @@ def crash(request: Request):
 
 
 a.bind('/storage', StorageView('C:/'))
+a.bind('/debug', Debug)
 if __name__ == '__main__':
     a.run()
