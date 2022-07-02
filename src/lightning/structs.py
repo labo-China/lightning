@@ -163,6 +163,7 @@ class Interface:
         """Return a response which is produced by specified method in request"""
         method = request.method
         if method not in Method.__args__:
+            logging.warning(f'Request method {method} is invaild. Sending 400-Response instead.')
             return Response(400)  # incorrect request method
 
         handler = self.methods.get(method)
@@ -177,6 +178,7 @@ class Interface:
         :param request:  the request that will be processed
         """
         if self.strict and (request.path != '/'):
+            logging.warning(f'Request path {request.path} is out of root directory. Sending 404-Response instead')
             return Response(404)
 
         for pre in self.pre:
@@ -353,7 +355,7 @@ class Node(Interface):
 
         if isinstance(interface_or_method, Interface):  # called as a normal function
             self.map_static[pattern] = interface_or_method
-            logging.info(f'{interface_or_method} is bind on {pattern}')
+            logging.info(f'{interface_or_method} is bound on {pattern}')
             return
 
         def decorator(func):  # called as a decorator
@@ -393,13 +395,14 @@ class Worker:
                 request = self.queue.get(timeout = self.timeout)
                 with self.root_node as i:
                     resp = i.process(request)
-                    logging.info(f'{i} processed successful with {resp}[{request.addr}]')
+                    logging.info(f'{i} processed successfully with {resp}[{request.addr}]')
                     if resp and not getattr(request.conn, '_closed'):
                         resp_data = resp.generate()
                         request.conn.sendall(resp_data)
                     request.conn.close()
 
                 if not getattr(request.conn, '_closed'):
+                    logging.warning('It seems that the process has not completed yet. Sending fallback response.')
                     request.conn.sendall(self.fallback(request).generate())
                 request.conn.close()
             except queue.Empty:
@@ -425,6 +428,7 @@ class ProcessWorker(Worker, multiprocessing.Process):
     queue_type = multiprocessing.Queue
 
     def __init__(self, *args, **kwargs):
+        logging.warning('You are using ProcessWorker (which is UNSTABLE)! The server may be malfunctioning!!!')
         super().__init__(*args, **kwargs)
         self.daemon = True
 

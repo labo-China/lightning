@@ -47,8 +47,7 @@ class Server:
         else:
             self._sock = socket.socket(conn_famliy)
             self._sock.settimeout(timeout)
-            # self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            # disabled code above so that we can identify if a server is running as a child process
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 self._sock.bind(server_addr)
             except OSError:
@@ -81,7 +80,7 @@ class Server:
         :param block: if it is True, this method will be blocked until the server shutdown or critical errors occoured
         """
         if self._is_child:
-            logging.warning('The target address is unavailable, the server will not run')
+            logging.warning('The server is seemed to be started as a child process. The server will not run')
             return
         self.is_running = True
         logging.info('Creating request processors...')
@@ -150,12 +149,12 @@ class Server:
                 t.join(timeout)
             self._sock.settimeout(0)
         else:
-            logging.warning('The server is already stopped, pausing it will not take any effects.')
+            logging.warning('The server has already stopped, pausing it will not take any effects.')
             return
         if self.listener:
             logging.info('Waiting for connection listener...')
             self.listener.join(timeout)
-        logging.info(f'{self} paused successful.')
+        logging.info(f'{self} paused successfully.')
         return
 
     def terminate(self):
@@ -177,12 +176,12 @@ class Server:
                 _terminate(t)
             self._sock.close()
         else:
-            logging.warning('The server is already stopped.')
+            logging.warning('The server has already stopped.')
             return
         if self.listener.is_alive():
             logging.info('Terminating connection listener...')
             _terminate(self.listener)
-        logging.info(f'{self} closed successful.')
+        logging.info(f'{self} closed successfully.')
 
     def __enter__(self):
         self.run(block = False)
