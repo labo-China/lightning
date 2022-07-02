@@ -18,10 +18,7 @@ def recv_request_line(conn: socket.socket) -> bytes:
 
 
 def recv_request_head(conn: socket.socket) -> bytes:
-    timeout = conn.gettimeout()
-    conn.settimeout(0.25)
     stack = conn.recv(16)
-    conn.settimeout(timeout)
     while b'\r\n\r\n' not in stack:
         current_recv = conn.recv(1)
         stack += current_recv
