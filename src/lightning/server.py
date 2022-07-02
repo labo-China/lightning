@@ -1,4 +1,5 @@
 import logging
+import multiprocessing
 import socket
 import time
 import traceback
@@ -30,35 +31,58 @@ class Server:
         self.listener = None
         self.addr = sock.getsockname() if sock else server_addr
         self.max_instance = max_instance
-        self.max_listen = max_listen
 
         self.worker_type = ThreadWorker if multi_status == 'thread' else ProcessWorker \
             if multi_status == 'process' else None  # DON`T use 'process'! It`s unavailable now.
         self.queue = self.worker_type.queue_type()
         self.processor_list: set[Worker] = set()
-
+        self._is_child = self._check_process()
         self.root_node = Node(*args, **kwargs)
-        self.bind = self.root_node.bind
+        self.bind = self.root_node.bind if not self._is_child else lambda *ag, **kw: lambda x: None
+        if self._is_child:
+            return  # not to initialize socket
 
         if sock:
             self._sock = sock
         else:
             self._sock = socket.socket(conn_famliy)
             self._sock.settimeout(timeout)
-            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self._sock.bind(server_addr)
-            self._sock.listen(max_listen)
+            # self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # disabled code above so that we can identify if a server is running as a child process
+            try:
+                self._sock.bind(server_addr)
+            except OSError:
+                self._is_child = True
+            else:
+                self._sock.listen(max_listen)
 
         if ssl_cert:
             ssl_context = SSLContext()
             ssl_context.load_cert_chain(ssl_cert)
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
 
+    def _check_process(self):
+        tester = socket.socket()
+        try:
+            tester.bind(self.addr)
+        except OSError:
+            tester.close()
+            if self.worker_type == ProcessWorker:
+                logging.info(f'The server is seemed to be started as a child process. Ignoring all operations...')
+                return True
+            else:
+                logging.error(f'The target address is unavailable')
+        tester.close()
+        return False
+
     def run(self, block: bool = True):
         """
         start the server\n
         :param block: if it is True, this method will be blocked until the server shutdown or critical errors occoured
         """
+        if self._is_child:
+            logging.warning('The target address is unavailable, the server will not run')
+            return
         self.is_running = True
         logging.info('Creating request processors...')
         self.processor_list = set(self.worker_type(self.root_node, self.queue) for _ in range(self.max_instance))
@@ -82,6 +106,7 @@ class Server:
         while self.is_running:
             try:
                 connection, address = self._sock.accept()
+                logging.debug(f'received connection from {address}')
             except socket.timeout:
                 continue
             except OSError:
@@ -139,7 +164,8 @@ class Server:
         """
         def _terminate(worker: Worker):
             if isinstance(worker, ProcessWorker):
-                worker.terminate()
+                worker.join()
+                worker.close()
             else:
                 worker.join(0)
 
