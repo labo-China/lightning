@@ -69,7 +69,7 @@ class Response:
     desc: str = None
     version: str = field(default = 'HTTP/1.1')
     header: dict[str, str] = field(default_factory = dict)
-    timestamp: Union[datetime, int] = int(time.time())
+    timestamp: Union[datetime, int] = field(default_factory = lambda: int(time.time()))
     content: Union[bytes, str] = b''
     encoding: str = 'utf-8'
 
