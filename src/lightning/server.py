@@ -6,7 +6,7 @@ from ssl import SSLContext
 from threading import Thread
 
 from . import utility, interfaces
-from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Session, Node, Request, Response
+from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Node, Request, Response
 
 logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(message)s')
 
@@ -61,7 +61,7 @@ class Server:
         """
         self.is_running = True
         logging.info('Creating request processors...')
-        self.processor_list = set(self.worker_type(self.queue) for _ in range(self.max_instance))
+        self.processor_list = set(self.worker_type(self.root_node, self.queue) for _ in range(self.max_instance))
         logging.info(f'Listening request on {self.addr}')
         self.listener = Thread(target = self.accept_request)
         self.listener.daemon = True
@@ -98,8 +98,7 @@ class Server:
         try:
             request = Request(addr = address,
                               **utility.parse_req(utility.recv_request_head(connection)), conn = connection)
-            session = Session(self.root_node, request)
-            self.queue.put(session)
+            self.queue.put(request)
         except ValueError:
             traceback.print_exc()
             try:

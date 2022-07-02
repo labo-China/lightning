@@ -375,33 +375,12 @@ class Node(Interface):
         return ret
 
 
-class Session:
-    def __init__(self, interface: Interface, request: Request):
-        self.interface = interface
-        self.request = request
-
-    def execute(self):
-        """Execute the interface with request"""
-        with self.interface as i:
-            resp = i.process(self.request)
-            logging.info(f'{i} processed successful with {resp}')
-            if resp and not getattr(self.request.conn, '_closed'):
-                resp_data = resp.generate()
-                self.request.conn.sendall(resp_data)
-            self.request.conn.close()
-        try:
-            self.request.conn.sendall(self.interface.fallback(self.request).generate())
-        except OSError:
-            pass  # interface processed successful
-        finally:
-            self.request.conn.close()
-
-
 class Worker:
     base_type = None
 
-    def __init__(self, request_queue: queue.Queue, timeout: float = 30):
+    def __init__(self, root_node: Node, request_queue: queue.Queue, timeout: float = 30):
         super().__init__()
+        self.root_node = root_node
         self.queue = request_queue
         self.running_state = False
         self.timeout = timeout
@@ -411,7 +390,18 @@ class Worker:
         self.running_state = True
         while self.running_state:
             try:
-                self.queue.get(timeout = self.timeout).execute()
+                request = self.queue.get(timeout = self.timeout)
+                with self.root_node as i:
+                    resp = i.process(request)
+                    logging.info(f'{i} processed successful with {resp}[{request.addr}]')
+                    if resp and not getattr(request.conn, '_closed'):
+                        resp_data = resp.generate()
+                        request.conn.sendall(resp_data)
+                    request.conn.close()
+
+                if not getattr(request.conn, '_closed'):
+                    request.conn.sendall(self.fallback(request).generate())
+                request.conn.close()
             except queue.Empty:
                 continue
         return
@@ -424,8 +414,8 @@ class ThreadWorker(Worker, threading.Thread):
     base_type = threading.Thread
     queue_type = queue.Queue
 
-    def __init__(self, request_queue: queue.Queue, timeout: float = 30):
-        super().__init__(request_queue = request_queue, timeout = timeout)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.daemon = True
 
 
@@ -434,9 +424,10 @@ class ProcessWorker(Worker, multiprocessing.Process):
     base_type = multiprocessing.Process
     queue_type = multiprocessing.Queue
 
-    def __init__(self, request_queue: multiprocessing.Queue, timeout: float = 30):
-        super().__init__(request_queue = request_queue, timeout = timeout)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.daemon = True
 
 
-__all__ = ['Request', 'Response', 'Interface', 'Node', 'Session',
+__all__ = ['Request', 'Response', 'Interface', 'Node',
            'Worker', 'ThreadWorker', 'ProcessWorker', 'WSGIInterface']
