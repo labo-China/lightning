@@ -132,12 +132,11 @@ class Server:
         except (socket.timeout, ConnectionResetError):
             return
 
-    def interrupt(self, timeout: float = None):
+    def interrupt(self, timeout: float = 30):
         """
         Stop the server temporarily. Use "run" method to start the server again.\n
         :param timeout: max time for waiting single active session
         """
-        timeout = timeout or 30
         if self.is_running:
             logging.info(f'Pausing {self}')
             self.is_running = False
@@ -147,7 +146,7 @@ class Server:
             for t in self.processor_list:
                 logging.info(f'Waiting for active session {t.name}...')
                 t.join(timeout)
-            self._sock.settimeout(0)
+            # self._sock.settimeout(0)
         else:
             logging.warning('The server has already stopped, pausing it will not take any effects.')
             return
@@ -162,11 +161,9 @@ class Server:
         Stop the server permanently. After running this method, the server cannot start again.
         """
         def _terminate(worker: Worker):
+            worker.join(0)
             if isinstance(worker, ProcessWorker):
-                worker.join()
                 worker.close()
-            else:
-                worker.join(0)
 
         if self.is_running:
             logging.info(f'Terminating {self}')

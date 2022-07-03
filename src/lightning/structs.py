@@ -380,7 +380,7 @@ class Node(Interface):
 class Worker:
     base_type = None
 
-    def __init__(self, root_node: Node, request_queue: queue.Queue, timeout: float = 30):
+    def __init__(self, root_node: Node, request_queue: queue.Queue, timeout: float = 5):
         super().__init__()
         self.root_node = root_node
         self.queue = request_queue
