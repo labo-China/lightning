@@ -3,7 +3,6 @@ import pathlib
 from mimetypes import guess_type
 from os.path import getsize, basename
 from os import scandir, DirEntry
-
 from .structs import Interface, Response, Request
 
 

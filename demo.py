@@ -1,5 +1,7 @@
 from src.lightning import Request, Response, Server, StorageView, Debug
+import logging
 
+logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(message)s')
 # author: 程鹏博 景炎 2010
 # date 2021-4-9
 a = Server()

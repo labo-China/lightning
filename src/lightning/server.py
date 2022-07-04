@@ -1,15 +1,12 @@
 import logging
-import multiprocessing
 import socket
 import time
 import traceback
 from ssl import SSLContext
 from threading import Thread
 
-from . import utility, interfaces
-from .structs import Interface, Worker, ThreadWorker, ProcessWorker, Node, Request, Response
-
-logging.basicConfig(level = 'INFO', format = '[%(levelname)s](%(funcName)s) %(message)s')
+from . import utility
+from .structs import Worker, ThreadWorker, ProcessWorker, Node, Request, Response
 
 
 class Server:
@@ -162,7 +159,7 @@ class Server:
         """
         def _terminate(worker: Worker):
             worker.join(0)
-            if isinstance(worker, ProcessWorker):
+            if self.worker_type == ProcessWorker:
                 worker.close()
 
         if self.is_running:
