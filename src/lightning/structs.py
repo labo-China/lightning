@@ -26,7 +26,7 @@ class Request:
     header: dict[str, str] = field(default_factory = dict)
     query: str = field(default = '')
     conn: socket.socket = None
-    path: str = None
+    path: str = ''
 
     def __post_init__(self):
         """Set path to url if path not specfied"""
@@ -177,7 +177,7 @@ class Interface:
         Let the function processes the request and returns the result\n
         :param request:  the request that will be processed
         """
-        if self.strict and (request.path != '/'):
+        if self.strict and (request.path != ''):
             logging.warning(f'Request path {request.path} is out of root directory. Sending 404-Response instead')
             return Response(404)
 

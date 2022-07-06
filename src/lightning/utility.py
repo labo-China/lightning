@@ -42,8 +42,7 @@ def parse_req(content: bytes) -> dict:
     url, ver = uv.rsplit(' ', 1)
 
     url = unquote(url)
-    path, param = url.split('?', 1) if '?' in url else [url, '']
-    path = path + '/' if not path.endswith('/') else path
+    path, param = url.split('?', 1) if '?' in url else (url, '')
 
     keyword, arg = {}, set()
     for p in param.split('&'):
