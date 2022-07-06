@@ -4,6 +4,7 @@ import queue
 import socket
 import threading
 import time
+import copy
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -100,6 +101,17 @@ class Response:
                f'{hd}\r\n\r\n'
         return text.encode(self.encoding) + self.content
 
+    @staticmethod
+    def create_from(obj: Union['Sendable', int], **kwargs):
+        if obj is None:
+            return Response(**kwargs)
+        if isinstance(obj, Response):
+            return obj
+        elif isinstance(obj, (str, bytes)):
+            return Response(content = obj, **kwargs)
+        else:
+            return Response(obj, **kwargs)
+
     def __call__(self, *args, **kwargs):
         # provide a call method here so that Response object could act as a static Responsive object
         return self
@@ -113,15 +125,6 @@ class Response:
 
 Sendable = Union[Response, str, bytes, None]
 Responsive = Callable[[Request], Sendable]
-
-
-def create_response(obj: Sendable = None, **kwargs) -> Response:
-    if isinstance(obj, Response):
-        return obj
-    elif isinstance(obj, Union[str, bytes]):
-        return Response(content = obj, **kwargs)
-    else:
-        return Response(**kwargs)
 
 
 class Interface:
@@ -159,6 +162,13 @@ class Interface:
     def __enter__(self):
         return self
 
+    @staticmethod
+    def create_from(obj, **kwargs):
+        if isinstance(obj, Interface):
+            return obj
+        else:
+            return Interface(obj, **kwargs)
+
     def _select_method(self, request: Request) -> Sendable:
         """Return a response which is produced by specified method in request"""
         method = request.method
@@ -186,11 +196,11 @@ class Interface:
             if isinstance(res, Request):
                 request = res
             elif isinstance(res, Sendable):
-                return create_response(res)
+                return Response.create_from(res)
 
-        resp = create_response(self._select_method(request))
+        resp = Response.create_from(self._select_method(request))
         for pst in self.post:
-            resp = create_response(pst(request, resp))
+            resp = Response.create_from(pst(request, resp))
         return resp
 
     def options_(self, request: Request) -> Response:
