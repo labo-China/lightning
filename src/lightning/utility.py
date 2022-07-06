@@ -4,10 +4,14 @@ from typing import Literal
 
 
 def format_header(header: str) -> str:
+    """
+    format the given header. Example:format_header('connection:keep-alive') -> 'Connection:Keep-Alive'
+    """
     return '-'.join(map(lambda x: x.capitalize(), header.split('-')))
 
 
 def recv_request_line(conn: socket.socket) -> bytes:
+    """Receive the request line (like GET / HTTP/1.1)"""
     stack = conn.recv(16)
     while b'\r\n' not in stack:
         current_recv = conn.recv(1)
@@ -18,6 +22,7 @@ def recv_request_line(conn: socket.socket) -> bytes:
 
 
 def recv_request_head(conn: socket.socket) -> bytes:
+    """Receive HTTP header (like Host: localhost)"""
     stack = conn.recv(4)
     while b'\r\n\r\n' not in stack:
         current_recv = conn.recv(1)
@@ -28,6 +33,7 @@ def recv_request_head(conn: socket.socket) -> bytes:
 
 
 def recv_all(conn: socket.socket, buffer: int = 1024) -> bytes:
+    """Receive all data"""
     content = b''
     c = True
     while c:
@@ -37,6 +43,7 @@ def recv_all(conn: socket.socket, buffer: int = 1024) -> bytes:
 
 
 def parse_req(content: bytes) -> dict:
+    """Parse a request data into a dict object in order to construct a Request object"""
     line, *head = content.decode().split('\r\n')
     method, uv = line.split(' ', 1)
     url, ver = uv.rsplit(' ', 1)

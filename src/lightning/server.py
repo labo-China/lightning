@@ -58,6 +58,7 @@ class Server:
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
 
     def _check_process(self):
+        """Check whether the server is started as a child process"""
         tester = socket.socket()
         try:
             tester.bind(self.addr)
@@ -96,7 +97,7 @@ class Server:
                     return
 
     def accept_request(self):
-        """Accept TCP requests from listening ports and forward it"""
+        """Accept TCP requests from listening ports"""
         for p in self.processor_list:
             p.start()
         while self.is_running:
@@ -112,7 +113,7 @@ class Server:
 
     def handle_request(self, connection, address):
         """
-        Construct an HTTP request object and put it into requests queue\n
+        Construct an HTTP request object and put it into the request queue\n
         :param connection: a socket object which is connected to HTTP Client
         :param address: address of client socket
         """
@@ -131,7 +132,7 @@ class Server:
 
     def interrupt(self, timeout: float = 30):
         """
-        Stop the server temporarily. Use "run" method to start the server again.\n
+        Stop the server temporarily. Call run() to start the server again.\n
         :param timeout: max time for waiting single active session
         """
         if self.is_running:

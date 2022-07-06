@@ -17,7 +17,11 @@ from . import utility
 
 @dataclass
 class Request:
-    """Request that recevived from the parser of server"""
+    """
+    Request object which include HTTP headers and parsed request line
+    Note: the object will only receive HTTP head.
+    To get the request body, call content() or iter_content()
+    """
     addr: tuple[str, int] = field(default = ('127.0.0.1', -1))
     method: Method = field(default = 'GET')
     url: str = field(default = '/')
@@ -35,14 +39,14 @@ class Request:
 
     def content(self, buffer: int = 1024) -> bytes:
         """
-        Get the content of the Request.\n
+        Get request content.\n
         :param buffer: buffer size of content
         """
         return utility.recv_all(conn = self.conn, buffer = buffer)
 
     def iter_content(self, buffer: int = 1024) -> Generator[bytes, None, None]:
         """
-        Get the content of the Request.\n
+        Get request content as an iterator.\n
         :param buffer: buffer size of content
         """
         content = True
@@ -51,7 +55,10 @@ class Request:
             yield content
 
     def generate(self) -> bytes:
-        """Generate the original request data from known request"""
+        """
+        Generate the original request data from known request.
+        The generated data might be INCONSISTENT with original request
+        """
         args = '&'.join(self.arg)
         keyword = '&'.join([f'{k[0]}={k[1]}' for k in self.keyword.items()])
         param = ('?' + args + ('&' + keyword if keyword else '')) if args or keyword else ''
@@ -65,7 +72,11 @@ class Request:
 
 @dataclass
 class Response:
-    """Response with normal initral function."""
+    r"""
+    Response object which include HTTP header and response body
+    Note: you cannot create an instance by using Response('str_or_bytes')
+    For these cases, use Response.create_from(obj) instead.
+    """
     code: int = 200
     desc: str = None
     version: str = field(default = 'HTTP/1.1')
@@ -95,7 +106,7 @@ class Response:
         self.header['Content-Type'] += f';charset={self.encoding}'
 
     def generate(self) -> bytes:
-        """Returns the encoded HTTP response data."""
+        """Returns encoded HTTP response data."""
         hd = '\r\n'.join([': '.join([h, self.header[h]]) for h in self.header])
         text = f'{self.version} {self.code} {self.desc}\r\n' \
                f'{hd}\r\n\r\n'
@@ -103,6 +114,7 @@ class Response:
 
     @staticmethod
     def create_from(obj: Union['Sendable', int], **kwargs):
+        """Convert a Sendable object into a Response object"""
         if obj is None:
             return Response(**kwargs)
         if isinstance(obj, Response):
@@ -128,7 +140,7 @@ Responsive = Callable[[Request], Sendable]
 
 
 class Interface:
-    """The main HTTP server handler."""
+    """The HTTP server handler. It produces Responses to send."""
 
     def __init__(self, get_or_method: Union[dict[Method, Responsive], Responsive] = None,
                  generic: Responsive = Response(405), fallback: Responsive = Response(500),
@@ -136,13 +148,15 @@ class Interface:
                  post: list[Callable[[Request, Response], Sendable]] = None,
                  desc: str = None, strict: bool = False):
         r"""
-        :param get_or_method: a method-responsive-style dict, if a Responsive object is given, it will be GET handler
-        :param generic: default handler if no function is matched with method
-        :param strict: if it is True, the interface will catch extra path in interfaces and return a 404 response
+        :param get_or_method: a method-responsive-style dict. If a Responsive object is given, it will be GET handler
+        :param generic: the default handler if no function is matched with request method
+        :param fallback: function to call when an Exception is raised during processing requests
+            it`s return value will be the final response
+        :param strict: whether the interface will catch extra path in interfaces and return a 404 response
         :param desc: description about the interface. It will show instead of default message when calling __repr__
         :param pre: things to do before processing request, it will be sent as final response
-        if a Response object is given
-        :param post: things to do after the function processed request, they should return a Response object
+            if a Response object is returned
+        :param post: things to do after the function processed request
         """
         if not get_or_method:
             self.methods = {}
@@ -163,7 +177,8 @@ class Interface:
         return self
 
     @staticmethod
-    def create_from(obj, **kwargs):
+    def create_from(obj: Union[Interface, Responsive], **kwargs):
+        """Convert a Responsive object into an Interface object"""
         if isinstance(obj, Interface):
             return obj
         else:
@@ -187,8 +202,8 @@ class Interface:
 
     def process(self, request: Request) -> Response:
         """
-        Let the function processes the request and returns the result\n
-        :param request:  the request that will be processed
+        Let target function processes the request and returns the result\n
+        :param request:  the request to process
         """
         if self.strict and (request.path != ''):
             logging.warning(f'Request path {request.path} is out of root directory. Sending 404-Response instead')
@@ -323,7 +338,7 @@ class Node(Interface):
                  interface_callback: Callable[[], dict[str, Interface]] = None,
                  default: Responsive = Response(404), *args, **kwargs):
         """
-        :param interface_map: Initral mapping for interfaces
+        :param interface_map: initral mapping for interfaces
         :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
         :param default: the final interface when no interfaces were matched
         """
@@ -362,8 +377,7 @@ class Node(Interface):
     def bind(self, pattern: str, interface_or_method: Union[Interface, list[Method]] = None, *args, **kwargs):
         r"""
         Bind an interface or function into this node.
-
-        :param pattern: the url prefix that used to match requests.
+        :param pattern: the url prefix to match requests.
         :param interface_or_method: If the function is called as a normal function, the value is the Interface
             needs to bind. If the function is called as a decorator or the value is None, the value is expected
             HTTP methods list. If the value is None, it means the Interface will be a GET handler by default.
@@ -406,12 +420,13 @@ class Worker:
         self.timeout = timeout
 
     def run(self):
+        """Start the worker. The method will keep locking until the worker is stopped."""
         logging.info(f'{self.name} is running')
         self.running_state = True
         while self.running_state:
             try:
                 request = self.queue.get(timeout = self.timeout)
-                with self.root_node as i:
+                with self.root_node as i:  # use with here to catch errors
                     resp = i.process(request)
                     logging.info(f'{i} processed successfully with {resp}[{request.addr}]')
                     if resp and not getattr(request.conn, '_closed'):
