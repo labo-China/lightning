@@ -5,4 +5,4 @@ from .utility import *
 from . import interfaces
 from . import utility
 
-__version__ = '0.0.5.0'
+__version__ = '0.5.1'
