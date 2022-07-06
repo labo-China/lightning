@@ -11,8 +11,7 @@ from datetime import datetime, timezone
 from ssl import SSLContext
 from typing import Union, Callable, Optional, Generator, Iterable
 
-from .utility import Method
-from . import utility
+from .utility import Method, recv_all, HTTP_CODE
 
 
 @dataclass
@@ -42,7 +41,7 @@ class Request:
         Get request content.\n
         :param buffer: buffer size of content
         """
-        return utility.recv_all(conn = self.conn, buffer = buffer)
+        return recv_all(conn = self.conn, buffer = buffer)
 
     def iter_content(self, buffer: int = 1024) -> Generator[bytes, None, None]:
         """
@@ -88,7 +87,7 @@ class Response:
     def __post_init__(self):
         # fill request desciptions
         if not self.desc:
-            self.desc = utility.HTTP_CODE[self.code]
+            self.desc = HTTP_CODE[self.code]
         # convert int timestamp to timestamp object
         if isinstance(self.timestamp, int):
             self.timestamp = datetime.fromtimestamp(self.timestamp, tz = timezone.utc)
@@ -177,7 +176,7 @@ class Interface:
         return self
 
     @staticmethod
-    def create_from(obj: Union[Interface, Responsive], **kwargs):
+    def create_from(obj: Union['Interface', Responsive], **kwargs):
         """Convert a Responsive object into an Interface object"""
         if isinstance(obj, Interface):
             return obj
