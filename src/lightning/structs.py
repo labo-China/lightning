@@ -153,7 +153,7 @@ class Interface:
             self.methods = {'GET': get_or_method}
         self.methods: dict[Method, Responsive] = self.methods  # correct type suggestion mistakes caused by some IDEs
         self.generic = generic
-        self.fallback = fallback
+        self._fallback = fallback
         self.pre = pre or []
         self.post = post or []
         self.desc = desc
@@ -181,6 +181,9 @@ class Interface:
             return handler(request)
         else:
             return self.generic(request)
+
+    def fallback(self, request: Request) -> Response:
+        return Response.create_from(self._fallback(request))
 
     def process(self, request: Request) -> Response:
         """
@@ -413,7 +416,8 @@ class Worker:
 
                 if not getattr(request.conn, '_closed'):
                     logging.warning('It seems that the process has not completed yet. Sending fallback response.')
-                    request.conn.sendall(self.fallback(request).generate())
+                    fallback = self.root_node.select_target(request)[0].fallback
+                    request.conn.sendall(fallback(request).generate())
                 request.conn.close()
             except queue.Empty:
                 continue
