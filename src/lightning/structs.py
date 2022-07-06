@@ -326,25 +326,29 @@ class Node(Interface):
         :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
         :param default: the final interface when no interfaces were matched
         """
-        super().__init__(generic = self.select, *args, **kwargs)
+        super().__init__(generic = self._process, *args, **kwargs)
         self.map_static: dict[str, Interface] = interface_map or {}
         self.map_callback = interface_callback
         self.default = default
         self.last_call: str = ''
 
-    def select(self, request: Request) -> Response:
-        """Select the matched interface and let it process requests"""
+    def select_target(self, request: Request) -> tuple[Interface, Request]:
+        """Select the matched interface then return it with adjusted request"""
         interface_map = self.get_map()
-        for req_path in sorted(interface_map):
-            if request.path.startswith(req_path + '/') or request.path == req_path:
-                target = interface_map[req_path]
-                path = req_path
+        for bound_path in sorted(interface_map):
+            if request.path.startswith(bound_path + '/') or request.path == bound_path:
+                target = interface_map[bound_path]
+                path = bound_path
                 break
         else:
             target = self.default
             path = request.url
-        # process 'path'
-        request.path = request.path.removeprefix(path)
+        new_req = copy.copy(request)
+        new_req.path = request.path.removeprefix(path)
+        return Interface.create_from(target), new_req  # convert Response to Interface
+
+    def _process(self, request: Request) -> Sendable:
+        target, request = self.select_target(request)
         self.last_call = repr(target)
         return target(request)
 
