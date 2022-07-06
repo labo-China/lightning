@@ -302,7 +302,8 @@ class WSGIInterface(Interface):
         environ['CONTENT_LENGTH'] = request.header.get('Content-Length') or ''
         environ['SERVER_NAME'], environ['SERVER_PORT'] = request.conn.getsockname()
         environ['SERVER_PROTOCOL'] = request.version
-        map(lambda h: environ.update({f'HTTP_{h[0].upper()}': h[1]}), request.header.items())  # Set HTTP_xxx variables
+        for k, v in request.header.items():  # Set HTTP_xxx variables
+            environ.update({f'HTTP_{k.upper()}': v[1]})
         environ['wsgi.version'] = (1, 0)
         environ['wsgi.url_scheme'] = 'https' if isinstance(request.conn, SSLContext) else 'http'
         environ['wsgi.input'] = request.conn.makefile(mode = 'rwb')
