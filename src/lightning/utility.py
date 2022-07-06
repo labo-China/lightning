@@ -8,7 +8,7 @@ def format_header(header: str) -> str:
 
 
 def recv_request_line(conn: socket.socket) -> bytes:
-    stack = b''
+    stack = conn.recv(16)
     while b'\r\n' not in stack:
         current_recv = conn.recv(1)
         stack += current_recv
@@ -18,7 +18,7 @@ def recv_request_line(conn: socket.socket) -> bytes:
 
 
 def recv_request_head(conn: socket.socket) -> bytes:
-    stack = conn.recv(16)
+    stack = conn.recv(4)
     while b'\r\n\r\n' not in stack:
         current_recv = conn.recv(1)
         stack += current_recv
