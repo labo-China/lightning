@@ -54,15 +54,11 @@ def parse_req(content: bytes) -> dict:
             arg.add(p)
 
     header = {}
-    for h, v in (h.replace(' ', '').split(':', 1) for h in head):
-        header[format_header(h)] = v
+    for h, v in (h.split(':', 1) for h in head):
+        header[format_header(h.strip())] = v.strip()
 
     return {'method': method, 'url': path, 'keyword': keyword,
             'arg': arg, 'version': ver, 'header': header, 'query': '?' + param if param else ''}
-
-
-def shrink_string(s: str, max_len: int = 40):
-    return s[:max_len - 3] + '...' if len(s) > max_len else s
 
 
 HTTP_CODE = {
@@ -125,4 +121,4 @@ HTTP_CODE = {
     600: "Unparseable Response Headers"
 }
 Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS']
-__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'shrink_string', 'Method']
+__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'Method']
