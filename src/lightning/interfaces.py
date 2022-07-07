@@ -97,6 +97,8 @@ class StorageView(Interface):
             file = File(str(path))
             return file.download(request)
         elif path.is_dir():
+            if not request.url.endswith('/'):
+                return Response(301, header = {'Location': request.url + '/'})
             if self.enable_view:
                 return Response(content = self.render(request, path), header = {'Content-Type': 'text/html'})
             else:
