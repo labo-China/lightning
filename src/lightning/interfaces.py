@@ -81,7 +81,7 @@ class StorageView(Interface):
             if depth > self.depth:
                 return Response(403)
 
-        path = self.root.joinpath(request.path)
+        path = self.root.joinpath(request.path.removeprefix('/'))
         # check some condtitions
         if not path.exists():
             return Response(404)
