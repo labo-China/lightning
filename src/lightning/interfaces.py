@@ -18,6 +18,14 @@ class File(Interface):
         super().__init__(self.download, desc = path)
 
     def download(self, request: Request):
+        def sendfile(conn, *args):
+            try:
+                conn.sendfile(*args)
+            except (ConnectionAbortedError, ConnectionResetError):  # the error is raised by certain downloaders
+                pass
+            finally:
+                request.conn.close()  # block the worker to stop sending response
+
         try:
             file = open(self.path, 'rb')
         except PermissionError:
@@ -38,15 +46,16 @@ class File(Interface):
                 'Content-Type': 'application/octet-stream',
                 'Content-Disposition': 'attachment;filename=' + self.filename,
                 'Content-Range': f'bytes {start}-{end}/{self.filesize}'}).generate())
-            request.conn.sendfile(file, start, left)
+            sendfile(request.conn, file, start, left)
+            return Response(206)
         else:
             mime = guess_type(self.filename)[0] or 'application/octet-stream'
             header = {'Content-Disposition': 'attachment;filename=' + self.filename}
             request.conn.sendall(Response(header = {'Content-Length': str(self.filesize),
                                                     'Content-Type': mime,
                                                     'Accept-Ranges': 'bytes'} | header).generate())
-            request.conn.sendfile(file)
-        request.conn.close()
+            sendfile(request.conn, file)
+            return Response(200)
 
 
 class StorageView(Interface):
