@@ -86,9 +86,8 @@ class StorageView(Interface):
         if not path.exists():
             return Response(404)
         if path.is_symlink():
-            parents = path.parents
             path = path.resolve()
-            if not (self.allow_exceed_links or self.root in parents):
+            if not (self.allow_exceed_links or path.is_relative_to(self.root)):
                 return Response(403)
         if not self.test_accessibility(path):
             return Response(403)
@@ -138,7 +137,7 @@ class StorageView(Interface):
 
         folder, file = self.get_fd_set(path)
         for x in sorted(folder):
-            content += f'<a href="{request.url + x}">{x}/</a>\n'
+            content += f'<a href="{request.url + x}/">{x}/</a>\n'
         for y in sorted(file):
             content += f'<a href="{request.url + y}">{y}</a>\n'
         return content + '</pre></body></html>'
