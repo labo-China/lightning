@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import pathlib
 import queue
 import socket
 import threading
@@ -350,17 +351,18 @@ class Node(Interface):
     def select_target(self, request: Request) -> tuple[Interface, Request]:
         """Select the matched interface then return it with adjusted request"""
         interface_map = self.get_map()
-        for bound_path in sorted(interface_map):
-            if request.path.startswith(bound_path + '/') or request.path == bound_path:
+        req_path = pathlib.PurePosixPath(request.path)
+
+        for bound_path in sorted(interface_map.keys(), key = lambda x: (x.count('/'), x), reverse = True):
+            # sort it to make interface_map like ['/foo/bar', '/foo', '/goo', '/']
+            if req_path.is_relative_to(bound_path):
                 target = interface_map[bound_path]
-                path = bound_path
-                break
+                path = str(req_path.relative_to(bound_path))
+                new_req = copy.copy(request)
+                new_req.path = '/' + path if path and not path.startswith('/') else path
+                return target, new_req
         else:
-            target = self.default
-            path = request.url
-        new_req = copy.copy(request)
-        new_req.path = request.path.removeprefix(path)
-        return Interface.create_from(target), new_req  # convert Response to Interface
+            return Interface.create_from(self.default), request
 
     def _process(self, request: Request) -> Sendable:
         target, request = self.select_target(request)
@@ -381,9 +383,10 @@ class Node(Interface):
             needs to bind. If the function is called as a decorator or the value is None, the value is expected
             HTTP methods list. If the value is None, it means the Interface will be a GET handler by default.
         """
-        if not pattern.startswith('/'):
+        if pattern and not pattern.startswith('/'):
             pattern = '/' + pattern
-
+        if pattern != '/':
+            pattern = pattern.removesuffix('/')
         if isinstance(interface_or_method, Interface):  # called as a normal function
             self.map_static[pattern] = interface_or_method
             logging.info(f'{interface_or_method} is bound on {pattern}')
