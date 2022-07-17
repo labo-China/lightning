@@ -357,9 +357,14 @@ class Node(Interface):
             # sort it to make interface_map like ['/foo/bar', '/foo', '/goo', '/']
             if req_path.is_relative_to(bound_path):
                 target = interface_map[bound_path]
-                path = str(req_path.relative_to(bound_path))
+                path = request.path.removeprefix(bound_path)
                 new_req = copy.copy(request)
-                new_req.path = '/' + path if path and not path.startswith('/') else path
+                if path == '.':
+                    new_req.path = ''
+                elif path and not path.startswith('/'):
+                    new_req.path = '/' + path
+                else:
+                    new_req.path = path
                 return target, new_req
         else:
             return Interface.create_from(self.default), request
@@ -411,63 +416,28 @@ class Node(Interface):
         return ret
 
 
-class Worker:
-    base_type = None
-
-    def __init__(self, root_node: Node, request_queue: queue.Queue, timeout: float = 5):
-        super().__init__()
-        self.root_node = root_node
-        self.queue = request_queue
-        self.running_state = False
-        self.timeout = timeout
-
-    def run(self):
-        """Start the worker. The method will keep locking until the worker is stopped."""
-        logging.info(f'{self.name} is running')
-        self.running_state = True
-        while self.running_state:
-            try:
-                request = self.queue.get(timeout = self.timeout)
-                with self.root_node as i:  # use with here to catch errors
-                    resp = i.process(request)
-                    logging.info(f'{i} processed successfully with {resp}[{request.addr}]')
-                    if resp and not getattr(request.conn, '_closed'):
-                        resp_data = resp.generate()
-                        request.conn.sendall(resp_data)
-                    request.conn.close()
-
-                if not getattr(request.conn, '_closed'):
-                    logging.warning('It seems that the process has not completed yet. Sending fallback response.')
-                    fallback = self.root_node.select_target(request)[0].fallback
-                    request.conn.sendall(fallback(request).generate())
+def worker_run(name: str, root_node: Node, req_queue: Union[queue.Queue, multiprocessing.Queue], timeout: float = 5):
+    logging.info(f'{name} is running')
+    while True:
+        try:
+            request = req_queue.get(timeout = timeout)
+            with root_node as i:  # use with here to catch errors
+                resp = i.process(request)
+                logging.info(f'{i} processed successfully with {resp}[{request.addr}]')
+                if resp and not getattr(request.conn, '_closed'):
+                    resp_data = resp.generate()
+                    request.conn.sendall(resp_data)
                 request.conn.close()
-            except queue.Empty:
-                continue
-        return
 
-    def __del__(self):
-        logging.info(f'{self.name} closed successful.')
-
-
-class ThreadWorker(Worker, threading.Thread):
-    base_type = threading.Thread
-    queue_type = queue.Queue
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.daemon = True
+            if not getattr(request.conn, '_closed'):
+                logging.warning('It seems that the process has not completed yet. Sending fallback response.')
+                fallback = root_node.select_target(request)[0].fallback
+                request.conn.sendall(fallback(request).generate())
+            request.conn.close()
+        except queue.Empty:
+            continue
 
 
-class ProcessWorker(Worker, multiprocessing.Process):
-    """This class is unavailable for some unknown reason. Don`t use it!!!"""
-    base_type = multiprocessing.Process
-    queue_type = multiprocessing.Queue
-
-    def __init__(self, *args, **kwargs):
-        logging.warning('You are using ProcessWorker (which is UNSTABLE)! The server may be malfunctioning!!!')
-        super().__init__(*args, **kwargs)
-        self.daemon = True
-
-
+WorkerType = Union[threading.Thread, multiprocessing.Process]
 __all__ = ['Request', 'Response', 'Interface', 'Node',
-           'Worker', 'ThreadWorker', 'ProcessWorker', 'WSGIInterface']
+           'WSGIInterface', 'worker_run', 'WorkerType']

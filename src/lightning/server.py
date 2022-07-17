@@ -1,12 +1,14 @@
 import logging
+import multiprocessing
+import threading
+import queue
 import socket
 import time
 import traceback
 from ssl import SSLContext
-from threading import Thread
 
 from . import utility
-from .structs import Worker, ThreadWorker, ProcessWorker, Node, Request, Response
+from .structs import WorkerType, Node, Request, Response, worker_run
 
 
 class Server:
@@ -28,11 +30,18 @@ class Server:
         self.listener = None
         self.addr = sock.getsockname() if sock else server_addr
         self.max_instance = max_instance
+        self._worker_index = 1
 
-        self.worker_type = ThreadWorker if multi_status == 'thread' else ProcessWorker \
-            if multi_status == 'process' else None  # DON`T use 'process'! It`s unavailable now.
-        self.queue = self.worker_type.queue_type()
-        self.processor_list: set[Worker] = set()
+        if multi_status == 'process':
+            self.worker_type = multiprocessing.Process
+            self.queue = multiprocessing.Queue()
+        elif multi_status == 'thread':
+            self.worker_type = threading.Thread
+            self.queue = queue.Queue()
+        else:
+            raise ValueError(f'"{multi_status}" is not a valid multi_status flag. Use "process" or "thread" instead.')
+
+        self.processor_list: set[WorkerType] = set()
         self._is_child = self._check_process()
         self.root_node = Node(*args, **kwargs)
         self.bind = self.root_node.bind if not self._is_child else lambda *ag, **kw: lambda x: None
@@ -64,13 +73,21 @@ class Server:
             tester.bind(self.addr)
         except OSError:
             tester.close()
-            if self.worker_type == ProcessWorker:
+            if self.worker_type == multiprocessing.Process:
                 logging.info(f'The server is seemed to be started as a child process. Ignoring all operations...')
                 return True
             else:
                 logging.error(f'The target address is unavailable')
         tester.close()
         return False
+
+    def _create_worker(self):
+        name = f'Worker[{self._worker_index}]'
+        worker = self.worker_type(target = worker_run, name = name,
+                                  kwargs = {'name': name, 'root_node': self.root_node, 'req_queue': self.queue})
+        worker.daemon = True
+        self._worker_index += 1
+        return worker
 
     def run(self, block: bool = True):
         """
@@ -82,9 +99,9 @@ class Server:
             return
         self.is_running = True
         logging.info('Creating request processors...')
-        self.processor_list = set(self.worker_type(self.root_node, self.queue) for _ in range(self.max_instance))
+        self.processor_list = set(self._create_worker() for _ in range(self.max_instance))
         logging.info(f'Listening request on {self.addr}')
-        self.listener = Thread(target = self.accept_request)
+        self.listener = threading.Thread(target = self.accept_request)
         self.listener.daemon = True
         self.listener.start()
         print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
@@ -136,11 +153,9 @@ class Server:
         :param timeout: max time for waiting single active session
         """
         if self.is_running:
+            self._worker_index = 1
             logging.info(f'Pausing {self}')
             self.is_running = False
-            for t in self.processor_list:
-                t.running_state = False
-                t.timeout = 0
             for t in self.processor_list:
                 logging.info(f'Waiting for active session {t.name}...')
                 t.join(timeout)
@@ -158,9 +173,9 @@ class Server:
         """
         Stop the server permanently. After running this method, the server cannot start again.
         """
-        def _terminate(worker: Worker):
+        def _terminate(worker: WorkerType):
             worker.join(0)
-            if self.worker_type == ProcessWorker:
+            if self.worker_type == multiprocessing.Process:
                 worker.close()
 
         if self.is_running:
