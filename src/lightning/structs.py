@@ -202,8 +202,8 @@ class Interface:
 
     def process(self, request: Request) -> Response:
         """
-        Let target function processes the request and returns the result\n
-        :param request:  the request to process
+        Let target function process the request and return the result\n
+        :param request: the request to process
         """
         if self.strict and (request.path != ''):
             logging.warning(f'Request path {request.path} is out of root directory. Sending 404-Response instead')

@@ -11,7 +11,7 @@
 ## 创建一个例子
 ```python
 # 把这段代码保存为example.py
-import lightning
+from lightning import Server
 
 server = Server()
 
