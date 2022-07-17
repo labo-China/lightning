@@ -145,12 +145,12 @@ class StorageView(Interface):
 
 def _debug(request: Request) -> Response:
     """Return a human-readable information of request"""
-    ht = '\n    '.join(': '.join((h, request.header[h])) for h in request.header)
+    ht = '\n\t'.join(': '.join((h, request.header[h])) for h in request.header)
     pr = ' '.join(f'{k[0]}:{k[1]}' for k in request.keyword.items())
     content = f'<Request [{request.url}]> from {request.addr} {request.version}\n' \
               f'Method: {request.method}\n' \
               f'Headers: \n' \
-              f'{ht}\n' \
+              f'\t{ht}\n' \
               f'Query:{request.query}\n' \
               f'Params:{pr}\n' \
               f'Args:{" ".join(request.arg)}\n'
