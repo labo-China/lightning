@@ -43,8 +43,8 @@ def crash_test(request: Request):
     return Response(content = s)
 
 
-@a.bind('/fallback_test',  # The interface will raise an error but return a normal response from fallback
-        fallback = lambda request: f'Hello world! from {request.addr}⚡ (fallback)')
+@a.bind('/fallback_test', fallback = hello_world)
+# The interface will raise an error but return a normal response from fallback
 def fallback_test(request: Request):
     s = f'Hello world! from {request.addr}⚡' + str(1 / 0)
     return Response(content = s)
