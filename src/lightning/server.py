@@ -44,7 +44,7 @@ class Server:
         self.processor_list: set[WorkerType] = set()
         self._is_child = self._check_process()
         self.root_node = Node(*args, **kwargs)
-        self.bind = self.root_node.bind if not self._is_child else lambda *ag, **kw: lambda x: None
+        self.bind = self.root_node.bind
         if self._is_child:
             return  # not to initialize socket
 
@@ -54,12 +54,8 @@ class Server:
             self._sock = socket.socket(conn_famliy)
             self._sock.settimeout(timeout)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                self._sock.bind(server_addr)
-            except OSError:
-                self._is_child = True
-            else:
-                self._sock.listen(max_listen)
+            self._sock.bind(server_addr)
+            self._sock.listen(max_listen)
 
         if ssl_cert:
             ssl_context = SSLContext()
@@ -73,7 +69,7 @@ class Server:
             tester.bind(self.addr)
         except OSError:
             tester.close()
-            if self.worker_type == multiprocessing.Process:
+            if issubclass(self.worker_type, multiprocessing.process.BaseProcess):
                 logging.info(f'The server is seemed to be started as a child process. Ignoring all operations...')
                 return True
             else:
@@ -83,9 +79,8 @@ class Server:
 
     def _create_worker(self):
         name = f'Worker[{self._worker_index}]'
-        worker = self.worker_type(target = worker_run, name = name,
+        worker = self.worker_type(target = worker_run, name = name, daemon = True,
                                   kwargs = {'name': name, 'root_node': self.root_node, 'req_queue': self.queue})
-        worker.daemon = True
         self._worker_index += 1
         return worker
 
