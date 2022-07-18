@@ -195,6 +195,10 @@ class Server:
         self.terminate()
         return True
 
+    def __del__(self):
+        if self.is_running:
+            self.terminate()
+
     def __repr__(self) -> str:
         return f'Server[{"running" if self.is_running else "closed"} on {self.addr}]'
 
