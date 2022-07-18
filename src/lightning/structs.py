@@ -181,8 +181,10 @@ class Interface:
         """Convert a Responsive object into an Interface object"""
         if isinstance(obj, Interface):
             return obj
-        else:
+        elif hasattr(obj, '__call__'):
             return Interface(obj, **kwargs)
+        else:
+            raise ValueError(f'{obj} is not responsive nor callable')
 
     def _select_method(self, request: Request) -> Sendable:
         """Return a response which is produced by specified method in request"""
