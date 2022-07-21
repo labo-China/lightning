@@ -20,7 +20,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
-    "Development Status :: 3 Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
 ]
 
