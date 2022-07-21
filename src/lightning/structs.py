@@ -165,7 +165,8 @@ class Interface:
         else:
             # assume it is a Responsive object
             self.methods = {'GET': get_or_method}
-        self.methods: dict[Method, Responsive] = self.methods  # correct type suggestion mistakes caused by some IDEs
+        _methods = {'HEAD': self.head_, 'OPTIONS': self.options_}
+        self.methods: dict[Method, Responsive] = _methods | self.methods
         self.generic = generic
         self._fallback = fallback
         self.pre = pre or []
