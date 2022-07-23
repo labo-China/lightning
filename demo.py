@@ -1,4 +1,4 @@
-from src.lightning import Request, Response, Server, StorageView, Debug
+from src.lightning import Request, Response, Server, StorageView, Echo
 import logging
 import os
 
@@ -51,6 +51,6 @@ def fallback_test(request: Request):
 
 
 a.bind('/storage', StorageView(os.path.expanduser('~')))
-a.bind('/debug', Debug)
+a.bind('/echo', Echo)
 if __name__ == '__main__':
     a.run()
