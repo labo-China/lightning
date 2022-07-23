@@ -52,8 +52,7 @@ class Server:
         if sock:
             self._sock = sock
         else:
-            ip = ipaddress.ip_address(server_addr[0] or '127.0.0.1')
-            self._sock = socket.socket(socket.AF_INET if isinstance(ip, ipaddress.IPv4Address) else socket.AF_INET6)
+            self._sock = socket.socket(self._get_socket_family())
             self._sock.settimeout(timeout)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.bind(server_addr)
@@ -64,10 +63,15 @@ class Server:
             ssl_context.load_cert_chain(ssl_cert)
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
 
+    def _get_socket_family(self, default = socket.AF_INET):
+        if not self.addr[0]:
+            return default
+        addr = ipaddress.ip_address(self.addr[0])
+        return socket.AF_INET if isinstance(addr, ipaddress.IPv4Address) else socket.AF_INET6
+
     def _check_process(self):
         """Check whether the server is started as a child process"""
-        ip = ipaddress.ip_address(self.addr[0])
-        tester = socket.socket(socket.AF_INET if isinstance(ip, ipaddress.IPv4Address) else socket.AF_INET6)
+        tester = socket.socket(self._get_socket_family())
         try:
             tester.bind(self.addr)
         except OSError:
