@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lightning-server"
-version = "0.5.3"
+version = "0.5.4"
 authors = [
     { name="la", email="1784574357@qq.com" }
 ]
