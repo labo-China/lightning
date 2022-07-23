@@ -5,6 +5,7 @@ import queue
 import socket
 import time
 import traceback
+import ipaddress
 from ssl import SSLContext
 
 from . import utility
@@ -15,7 +16,7 @@ class Server:
     """The HTTP server class"""
     def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
                  timeout: int = None, max_instance: int = 4, multi_status: str = 'thread', ssl_cert: str = None,
-                 conn_famliy: socket.AddressFamily = socket.AF_INET, sock: socket.socket = None, *args, **kwargs):
+                 sock: socket.socket = None, *args, **kwargs):
         """
         :param server_addr: the address of server (host, port)
         :param max_listen: max size of listener queue
@@ -51,7 +52,8 @@ class Server:
         if sock:
             self._sock = sock
         else:
-            self._sock = socket.socket(conn_famliy)
+            ip = ipaddress.ip_address(server_addr[0] or '127.0.0.1')
+            self._sock = socket.socket(socket.AF_INET if isinstance(ip, ipaddress.IPv4Address) else socket.AF_INET6)
             self._sock.settimeout(timeout)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock.bind(server_addr)
