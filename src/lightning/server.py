@@ -66,7 +66,8 @@ class Server:
 
     def _check_process(self):
         """Check whether the server is started as a child process"""
-        tester = socket.socket()
+        ip = ipaddress.ip_address(self.addr[0])
+        tester = socket.socket(socket.AF_INET if isinstance(ip, ipaddress.IPv4Address) else socket.AF_INET6)
         try:
             tester.bind(self.addr)
         except OSError:
@@ -75,7 +76,7 @@ class Server:
                 logging.info(f'The server is seemed to be started as a child process. Ignoring all operations...')
                 return True
             else:
-                logging.error(f'The target address is unavailable')
+                logging.error(f'The target address {self.addr} is unavailable')
         tester.close()
         return False
 
