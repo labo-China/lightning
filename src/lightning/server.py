@@ -197,9 +197,11 @@ class Server:
 
     def __enter__(self):
         self.run(block = False)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.terminate()
+        if self.is_running:
+            self.terminate()
         return True
 
     def __del__(self):
