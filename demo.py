@@ -51,6 +51,7 @@ def fallback_test(request: Request):
 
 
 a.bind('/storage', StorageView(os.path.expanduser('~')))
+a.bind('/static_test', Response(204))
 a.bind('/echo', Echo)
 if __name__ == '__main__':
     a.run()
