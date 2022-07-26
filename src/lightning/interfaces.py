@@ -78,7 +78,7 @@ class StorageView(Interface):
         if self.depth:
             p = pathlib.Path(request.path)
             depth = len(p.parts)
-            if depth > self.depth:
+            if depth > self.depth + 1:
                 return Response(403)
 
         path = self.root.joinpath(request.path.removeprefix('/'))
