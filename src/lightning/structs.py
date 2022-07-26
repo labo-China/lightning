@@ -395,7 +395,8 @@ class Node(Interface):
             pattern = '/' + pattern
         if pattern != '/':
             pattern = pattern.removesuffix('/')
-        if isinstance(interface_or_method, Interface):  # called as a normal function
+        if isinstance(interface_or_method, Interface) or hasattr(interface_or_method, '__call__'):
+            # called as a normal function
             self.map_static[pattern] = interface_or_method
             logging.info(f'{interface_or_method} is bound on {pattern}')
             return
