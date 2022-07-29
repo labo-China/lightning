@@ -432,7 +432,7 @@ def worker_run(name: str, root_node: Node, req_queue: Union[queue.Queue, multipr
             with root_node as i:  # use with here to catch errors
                 resp = i.process(request)
                 logging.info(f'{i} processed successfully with {resp}[{request.addr}]')
-                if resp and not getattr(request.conn, '_closed'):
+                if not getattr(request.conn, '_closed'):
                     resp_data = resp.generate()
                     request.conn.sendall(resp_data)
                 request.conn.close()
