@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from ssl import SSLContext
 from typing import Union, Callable, Optional, Generator, Iterable
 
-from .utility import Method, recv_all, HTTP_CODE
+from .utility import Method, recv_all, HTTP_CODE, CaseInsensitiveDict
 
 
 @dataclass
@@ -28,7 +28,7 @@ class Request:
     version: str = field(default = 'HTTP/1.1')
     keyword: dict[str, str] = field(default_factory = dict)
     arg: set = field(default_factory = set)
-    header: dict[str, str] = field(default_factory = dict)
+    header: CaseInsensitiveDict[str, str] = field(default_factory = CaseInsensitiveDict)
     query: str = field(default = '')
     conn: socket.socket = None
     path: str = ''

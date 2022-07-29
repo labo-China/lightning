@@ -3,6 +3,42 @@ from urllib.parse import unquote
 from typing import Literal
 
 
+class CaseInsensitiveDict(dict):
+    def __init__(self, *args, **kwargs):
+        new_args = []
+        if args:
+            for arg_obj in args[0]:
+                new_args.append((arg_obj[0].lower(), arg_obj[1]))
+        new_kwargs = {}
+        for kwarg_key in kwargs:
+            new_kwargs[kwarg_key.lower()] = kwargs[kwarg_key]
+        super().__init__(new_args, **new_kwargs)
+
+    def __setitem__(self, key: str, value):
+        return super().__setitem__(key.lower(), value)
+
+    def __getitem__(self, item: str):
+        return super().__getitem__(item.lower())
+
+    def get(self, __key: str, default = None):
+        return super().get(__key.lower(), default)
+
+    def update(self, __m, **kwargs):
+        for key in __m:
+            self[key.lower()] = __m[key]
+        for k in kwargs:
+            self[k.lower()] = kwargs[k]
+
+    def __contains__(self, item):
+        return super().__contains__(item.lower())
+
+    def __or__(self, other) -> 'CaseInsensitiveDict':
+        ret = CaseInsensitiveDict()
+        ret.update(self)
+        ret.update(other)
+        return ret
+
+
 def format_header(header: str) -> str:
     """
     format the given header. Example:format_header('connection:keep-alive') -> 'Connection:Keep-Alive'
@@ -59,7 +95,7 @@ def parse_req(content: bytes) -> dict:
         else:
             arg.add(p)
 
-    header = {}
+    header = CaseInsensitiveDict()
     for h, v in (h.split(':', 1) for h in head):
         header[format_header(h.strip())] = v.strip()
 
@@ -127,4 +163,5 @@ HTTP_CODE = {
     600: "Unparseable Response Headers"
 }
 Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS']
-__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'Method']
+__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'Method',
+           'CaseInsensitiveDict']
