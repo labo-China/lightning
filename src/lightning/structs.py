@@ -165,8 +165,8 @@ class Interface:
         else:
             # assume it is a Responsive object
             self.methods = {'GET': get_or_method}
-        _methods = {'HEAD': self.head_, 'OPTIONS': self.options_}
-        self.methods: dict[Method, Responsive] = _methods | self.methods
+        self.default_methods = {'HEAD': self.head_, 'OPTIONS': self.options_}
+        self.methods: dict[Method, Responsive] = self.methods
         self.generic = generic
         self._fallback = fallback
         self.pre = pre or []
@@ -198,7 +198,10 @@ class Interface:
         if handler:
             return handler(request)
         else:
-            return self.generic(request)
+            if method in self.default_methods:
+                return self.default_methods[method](request)
+            else:
+                return self.generic(request)
 
     def fallback(self, request: Request) -> Response:
         return Response.create_from(self._fallback(request))
