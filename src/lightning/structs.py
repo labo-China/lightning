@@ -236,9 +236,10 @@ class Interface:
 
     def head_(self, request: Request) -> Response:
         """Default "HEAD" method implementation"""
-        if 'GET' not in self.methods:
+        if 'GET' not in self.methods and self.generic == Response(405):
             return Response(405)
-        resp = create_response(self.methods['GET'](request))
+        request.method = 'GET'
+        resp = Response.create_from(self.process(request))
         resp.content = b''
         return resp
 
