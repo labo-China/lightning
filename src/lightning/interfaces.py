@@ -10,12 +10,15 @@ from .structs import Interface, Response, Request
 class File(Interface):
     """The file interface"""
 
-    def __init__(self, path: str, filename: str = None, range_support: bool = True, updateble: bool = False):
+    def __init__(self, path: str, filename: str = None, mime: str = None,
+                 range_support: bool = True, updateble: bool = False, force_download: bool = False):
         self.path = path
         self.range = range_support
         self.update = updateble
         self.filename = filename or basename(path)
         self.filesize = getsize(self.path)
+        self.mime = mime or guess_type(self.filename)[0] or 'application/octet-stream'
+        self.force_download = force_download
         super().__init__(self.download, desc = path)
 
     def download(self, request: Request):
@@ -37,21 +40,21 @@ class File(Interface):
         if request.header.get('Range') and self.range:
             start, end = map(lambda x: int(x) if x else None, request.header.get('Range').split('=')[1].split('-'))
             start = start or 0
-            end = end or self.filesize
+            end = end or self.filesize - 1
             left = end - start + 1
 
-            if start > end or end > self.filesize:
+            if 0 > start or start > end or end >= self.filesize:
                 return Response(code = 416)
             request.conn.sendall(Response(code = 206, header = {
-                'Content-Length': str(end - start + 1),
-                'Content-Type': 'application/octet-stream',
-                'Content-Disposition': 'attachment;filename=' + self.filename,
+                'Content-Length': str(left),
+                'Content-Type': 'multipart/byteranges',
+                'Accept-Ranges': 'bytes',
                 'Content-Range': f'bytes {start}-{end}/{self.filesize}'}).generate())
             sendfile(request.conn, file, start, left)
             return Response(206)
         else:
             mime = guess_type(self.filename)[0] or 'application/octet-stream'
-            header = {'Content-Disposition': 'attachment;filename=' + self.filename}
+            header = {'Content-Disposition': 'attachment;filename=' + self.filename} if self.force_download else {}
             request.conn.sendall(Response(header = {'Content-Length': str(self.filesize),
                                                     'Content-Type': mime,
                                                     'Accept-Ranges': 'bytes'} | header).generate())
