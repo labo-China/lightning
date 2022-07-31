@@ -3,6 +3,7 @@ import pathlib
 from mimetypes import guess_type
 from os.path import getsize, basename
 from os import scandir, DirEntry
+from urllib.parse import quote
 from .structs import Interface, Response, Request
 
 
@@ -137,9 +138,9 @@ class StorageView(Interface):
 
         folder, file = self.get_fd_set(path)
         for x in sorted(folder):
-            content += f'<a href="{request.url + x}/">{x}/</a>\n'
+            content += f'<a href="{quote(request.url + x)}/">{x}/</a>\n'
         for y in sorted(file):
-            content += f'<a href="{request.url + y}">{y}</a>\n'
+            content += f'<a href="{quote(request.url + y)}">{y}</a>\n'
         return content + '</pre></body></html>'
 
 
