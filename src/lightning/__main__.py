@@ -1,5 +1,6 @@
 import argparse
 import logging
+import webbrowser
 from .server import Server
 from .interfaces import StorageView, Echo
 
@@ -11,6 +12,7 @@ parser.add_argument('--depth', default = 0, help = 'maxmium depth of direcrtorie
 parser.add_argument('--strict', action = 'store_true', help = 'disable view pages and disallow exceeded symlinks')
 parser.add_argument('-e', '--enable-echo', action = 'store_true', help = 'enable echo on /echo')
 parser.add_argument('-v', '--verbose', action = 'store_true', help = 'print INFO messages')
+parser.add_argument('-q', '--quiet', action = 'store_true', help = 'not to open web page in browsers')
 
 args = parser.parse_args()
 
@@ -26,4 +28,9 @@ if args.strict:
 else:
     conf = {'enable_view': True, 'allow_exceeded_links': True}
 server.bind('/', StorageView(root = args.path, depth = args.depth, **conf))
+
+if not args.quiet:
+    # assume that server will run before the browser actually starts to render the page
+    # so open browser first is totally fine here because browsers usually have a long startup time
+    webbrowser.open(f'http://{args.host}:{args.port}/')
 server.run()
