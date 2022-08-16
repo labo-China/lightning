@@ -1,12 +1,16 @@
-import logging
 import multiprocessing
 import threading
 import queue
+
 import socket
-import time
-import traceback
 import ipaddress
+import select
 from ssl import SSLContext
+
+import time
+import datetime
+import traceback
+import logging
 
 from . import utility
 from .structs import WorkerType, Node, Request, Response, worker_run
@@ -15,13 +19,13 @@ from .structs import WorkerType, Node, Request, Response, worker_run
 class Server:
     """The HTTP server class"""
     def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
-                 timeout: int = None, max_instance: int = 4, multi_status: str = 'thread', ssl_cert: str = None,
+                 timeout: int = None, max_worker: int = 4, multi_status: str = 'thread', ssl_cert: str = None,
                  sock: socket.socket = None, *args, **kwargs):
         """
         :param server_addr: the address of server (host, port)
         :param max_listen: max size of listener queue
         :param timeout: timeout for interrupting server
-        :param max_instance: max size of processing queue
+        :param max_worker: max size of worker queue
         :param multi_status: specify if this server use single processing or mulit-thread processing
         :param ssl_cert: SSL certificate content
         :param conn_famliy: address format
@@ -30,7 +34,7 @@ class Server:
         self.is_running = False
         self.listener = None
         self.addr = sock.getsockname() if sock else server_addr
-        self.max_instance = max_instance
+        self.max_worker = max_worker
         self._worker_index = 1
 
         if multi_status == 'process':
@@ -42,10 +46,10 @@ class Server:
         else:
             raise ValueError(f'"{multi_status}" is not a valid multi_status flag. Use "process" or "thread" instead.')
 
-        self.processor_list: set[WorkerType] = set()
+        self.worker_pool: set[WorkerType] = set()
         self._is_child = self._check_process()
         self.root_node = Node(*args, **kwargs)
-        self.bind = self.root_node.bind
+        self.bind = self.root_node.bind  # create an alias
         if self._is_child:
             return  # not to initialize socket
 
@@ -101,11 +105,12 @@ class Server:
             return
         self.is_running = True
         logging.info('Creating request processors...')
-        self.processor_list = set(self._create_worker() for _ in range(self.max_instance))
+        self.worker_pool = set(self._create_worker() for _ in range(self.max_worker))
         logging.info(f'Listening request on {self.addr}')
         self.listener = threading.Thread(target = self.accept_request)
         self.listener.daemon = True
         self.listener.start()
+        # self.handler =
         print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
         if block:
             while self.listener.is_alive():
@@ -117,7 +122,7 @@ class Server:
 
     def accept_request(self):
         """Accept TCP requests from listening ports"""
-        for p in self.processor_list:
+        for p in self.worker_pool:
             p.start()
         while self.is_running:
             try:
@@ -158,7 +163,7 @@ class Server:
             self._worker_index = 1
             logging.info(f'Pausing {self}')
             self.is_running = False
-            for t in self.processor_list:
+            for t in self.worker_pool:
                 logging.info(f'Waiting for active session {t.name}...')
                 t.join(timeout)
             # self._sock.settimeout(0)
@@ -183,7 +188,7 @@ class Server:
         if self.is_running:
             logging.info(f'Terminating {self}')
             self.is_running = False
-            for t in self.processor_list:
+            for t in self.worker_pool:
                 logging.info(f'Terminating {t.name}...')
                 _terminate(t)
             self._sock.close()

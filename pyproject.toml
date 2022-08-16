@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lightning-server"
-version = "0.6.1"
+version = "0.6.2"
 authors = [
     { name="la", email="1784574357@qq.com" }
 ]
@@ -20,7 +20,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
 ]
 
