@@ -1,10 +1,16 @@
+import copy
 import fnmatch
+import logging
 import pathlib
 from mimetypes import guess_type
 from os.path import getsize, basename
 from os import scandir, DirEntry
+from ssl import SSLContext
+from typing import Callable, Optional, Iterable, Union
 from urllib.parse import quote
-from .structs import Interface, Response, Request
+
+from .utility import Method
+from .structs import Interface, Response, Request, Responsive, Sendable
 
 
 class File(Interface):
@@ -147,6 +153,161 @@ class StorageView(Interface):
         return content + '</pre></body></html>'
 
 
+class WSGIInterface(Interface):
+    def __init__(self, application: Callable[[dict, Callable], Optional[Iterable[bytes]]], *args, **kwargs):
+        """
+        :param application: a callble object to run as a WSGI application
+        """
+        # remove 'pre' and 'post' arguments, they are unusable in WSGI standards.
+        self.app = application
+        self.response: Response = Response()
+        self.content_iter: Iterable = ()
+        kwargs.update({'pre': None, 'post': None})
+        super().__init__(self.call, *args, **kwargs)
+
+    def call(self, request: Request) -> Response:
+        resp = self.app(self.get_environ(request), self.start_response)
+        self.content_iter = (resp or []).__iter__()
+        data = self.response.generate()
+        try:
+            while data == self.response.generate():  # Waiting for the first non-empty response
+                data += self.content_iter.__next__()
+            for d in self.content_iter:
+                request.conn.send(d)
+        except StopIteration:
+            request.conn.send(data)  # Send an HTTP response with an empty body if no content is provided
+        finally:
+            # Reset static variables
+            self.response = Response()
+            self.content_iter = ()
+        return Response()  # Avoid interface to send response data
+
+    def start_response(self, status: str, header: list[tuple[str, str]] = None, exc_info: tuple = None):
+        """
+        Submit an HTTP response header, it will not be sent immediately.\n
+        :param status: HTTP status code and its description
+        :param header: HTTP headers like [(key1, value1), (key2, value2)]
+        :param exc_info: if an error occured, it is an exception tuple, otherwise it is None
+        """
+        logging.info(f'start_response is called by {self.app.__name__}')
+        if exc_info:
+            raise exc_info[1].with_traceback(exc_info[2])
+        code, desc = status.split(' ', 1)
+        self.response = Response(code = code, desc = desc, header = dict(header or {}))
+
+    @staticmethod
+    def get_environ(request: Request) -> dict:
+        """Return a dict includes WSGI varibles from a request"""
+        environ = {}
+        environ.update(dict(os.environ))
+        environ['REQUEST_METHOD'] = request.method.upper()
+        environ['SCRIPT_NAME'] = request.url.removesuffix(request.path)
+        environ['PATH_INFO'] = request.path.removeprefix('/')
+        environ['QUERY_STRING'] = request.query
+        environ['CONTENT_TYPE'] = request.header.get('Content-Type') or ''
+        environ['CONTENT_LENGTH'] = request.header.get('Content-Length') or ''
+        environ['SERVER_NAME'], environ['SERVER_PORT'] = request.conn.getsockname()
+        environ['SERVER_PROTOCOL'] = request.version
+        for k, v in request.header.items():  # Set HTTP_xxx variables
+            environ.update({f'HTTP_{k.upper()}': v[1]})
+        environ['wsgi.version'] = (1, 0)
+        environ['wsgi.url_scheme'] = 'https' if isinstance(request.conn, SSLContext) else 'http'
+        environ['wsgi.input'] = request.conn.makefile(mode = 'rwb')
+        environ['wsgi.errors'] = None  # unavailable now
+        environ['wsgi.multithread'] = environ['wsgi.multiprocess'] = False
+        environ['wsgi.run_once'] = True  # This server supports running application for multiple times
+        return environ
+
+    def __repr__(self) -> str:
+        return f'WSGIInterface[{self.app.__name__}]'
+
+
+class Node(Interface):
+    """An interface that provides a main-interface to carry sub-Interfaces."""
+
+    def __init__(self, interface_map: dict[str, Interface] = None,
+                 interface_callback: Callable[[], dict[str, Interface]] = None,
+                 default: Responsive = Response(404), *args, **kwargs):
+        """
+        :param interface_map: initral mapping for interfaces
+        :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
+        :param default: the final interface when no interfaces were matched
+        """
+        super().__init__(generic = self._process, *args, **kwargs)
+        self.map_static: dict[str, Interface] = interface_map or {}
+        self.map_callback = interface_callback
+        self.default = default
+        self.last_call: str = ''
+
+    def select_target(self, request: Request) -> tuple[Interface, Request]:
+        """Select the matched interface then return it with adjusted request"""
+        interface_map = self.get_map()
+        req_path = pathlib.PurePosixPath(request.path)
+
+        for bound_path in sorted(interface_map.keys(), key = lambda x: (x.count('/'), x), reverse = True):
+            # sort it to make interface_map like ['/foo/bar', '/foo', '/goo', '/']
+            if req_path.is_relative_to(bound_path):
+                target = interface_map[bound_path]
+                path = request.path.removeprefix(bound_path)
+                new_req = copy.copy(request)
+                if path == '.':
+                    new_req.path = ''
+                elif path and not path.startswith('/'):
+                    new_req.path = '/' + path
+                else:
+                    new_req.path = path
+                return target, new_req
+        else:
+            return Interface.create_from(self.default), request
+
+    def _process(self, request: Request) -> Sendable:
+        target, request = self.select_target(request)
+        self.last_call = repr(target)
+        return target(request)
+
+    def get_map(self) -> dict[str, Interface]:
+        """Return interface map as a dictonary"""
+        if not self.map_callback:
+            return self.map_static
+        return dict({**self.map_static, **self.map_callback()})
+
+    def bind(self, pattern: str, interface_or_method: Union[Interface, list[Method]] = None, *args, **kwargs):
+        r"""
+        Bind an interface or function into this node.
+        :param pattern: the url prefix to match requests.
+        :param interface_or_method: If the function is called as a normal function, the value is the Interface
+            needs to bind. If the function is called as a decorator or the value is None, the value is expected
+            HTTP methods list. If the value is None, it means the Interface will be a GET handler by default.
+        """
+        if pattern and not pattern.startswith('/'):
+            pattern = '/' + pattern
+        if pattern != '/':
+            pattern = pattern.removesuffix('/')
+        if isinstance(interface_or_method, Interface) or hasattr(interface_or_method, '__call__'):
+            # called as a normal function
+            self.map_static[pattern] = interface_or_method
+            logging.info(f'{interface_or_method} is bound on {pattern}')
+            return
+
+        def decorator(func):  # called as a decorator
+            if interface_or_method is not None:
+                parameter = dict.fromkeys(interface_or_method, func)
+                self.bind(pattern, Interface(get_or_method = parameter, *args, **kwargs))
+            else:
+                self.bind(pattern, Interface(func, *args, **kwargs))
+            return func  # return the given function to keep it
+
+        return decorator
+
+    def __repr__(self) -> str:
+        if self.last_call:
+            ret = self.last_call
+            self.last_call = ''
+        else:
+            ret = super().__repr__()
+        return ret
+
+
 def _echo(request: Request) -> Response:
     """Return a human-readable information of request"""
     ht = '\n\t'.join(': '.join((h, request.header[h])) for h in request.header)
@@ -163,4 +324,4 @@ def _echo(request: Request) -> Response:
 
 Echo = Interface(generic = _echo)
 Empty = Interface(lambda: Response(204))
-__all__ = ['File', 'StorageView', 'Echo', 'Empty']
+__all__ = ['File', 'StorageView', 'Node', 'WSGIInterface', 'Echo', 'Empty']

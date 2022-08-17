@@ -18,6 +18,7 @@ from .structs import WorkerType, Node, Request, Response, worker_run
 
 class Server:
     """The HTTP server class"""
+
     def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
                  timeout: int = None, max_worker: int = 4, multi_status: str = 'thread', ssl_cert: str = None,
                  sock: socket.socket = None, *args, **kwargs):
@@ -90,7 +91,7 @@ class Server:
 
     def _create_worker(self):
         name = f'Worker[{self._worker_index}]'
-        worker = self.worker_type(target = worker_run, name = name, daemon = True,
+        worker = self.worker_type(target = run_worker, name = name, daemon = True,
                                   kwargs = {'name': name, 'root_node': self.root_node, 'req_queue': self.queue})
         self._worker_index += 1
         return worker
@@ -106,12 +107,14 @@ class Server:
         self.is_running = True
         logging.info('Creating request processors...')
         self.worker_pool = set(self._create_worker() for _ in range(self.max_worker))
+        for p in self.worker_pool:
+            p.start()
+
         logging.info(f'Listening request on {self.addr}')
-        self.listener = threading.Thread(target = self.accept_request)
-        self.listener.daemon = True
+        self.listener = threading.Thread(target = self.accept_conn, daemon = True)
         self.listener.start()
-        # self.handler =
         print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
+
         if block:
             while self.listener.is_alive():
                 try:
@@ -120,10 +123,8 @@ class Server:
                     self.terminate()
                     return
 
-    def accept_request(self):
+    def accept_conn(self):
         """Accept TCP requests from listening ports"""
-        for p in self.worker_pool:
-            p.start()
         while self.is_running:
             try:
                 connection, address = self._sock.accept()
@@ -180,6 +181,7 @@ class Server:
         """
         Stop the server permanently. After running this method, the server cannot start again.
         """
+
         def _terminate(worker: WorkerType):
             worker.join(0)
             if self.worker_type == multiprocessing.Process:
