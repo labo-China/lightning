@@ -31,6 +31,7 @@ server.bind('/', StorageView(root = args.path, depth = args.depth, **conf))
 
 if not args.quiet:
     # assume that server will run before the browser actually starts to render the page
-    # so open browser first is totally fine here because browsers usually have a long startup time
-    webbrowser.open(f'http://{args.host}:{args.port}/')
+    # so open browser first is totally fine here because browsers usually have longer startup time
+    host = '127.0.0.1' if args.host == '0.0.0.0' else args.host
+    webbrowser.open(f'http://{host}:{args.port}/')
 server.run()
