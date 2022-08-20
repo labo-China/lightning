@@ -168,9 +168,6 @@ class Interface:
         self.desc = desc
         self.strict = strict
 
-    def __enter__(self):
-        return self
-
     @staticmethod
     def create_from(obj: Union['Interface', Responsive], **kwargs):
         """Convert a Responsive object into an Interface object"""
@@ -239,11 +236,6 @@ class Interface:
 
     def __call__(self, *args, **kwargs):
         return self.process(*args, **kwargs)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_tb:
-            traceback.print_exception(exc_type, value = exc_val, tb = exc_tb)
-        return True
 
     def __repr__(self) -> str:
         def name(obj):
