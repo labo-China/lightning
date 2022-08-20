@@ -164,7 +164,7 @@ class Server:
         self.connection_pool = ConnectionPool()
         self.worker_pool: set[WorkerType] = set()
         self._is_child = self._check_process()
-        self.root_node = Node(*args, **kwargs)
+        self.root_node = Node(desc = 'root_node', *args, **kwargs)
         self.bind = self.root_node.bind  # create an alias
         if self._is_child:
             return  # not to initialize socket
@@ -246,7 +246,7 @@ class Server:
         while self.is_running:
             try:
                 connection, address = self._sock.accept()
-                logging.debug(f'received connection from {address}')
+                logging.debug(f'<-{utility.format_socket(connection)}')
             except socket.timeout:
                 continue
             except OSError:
