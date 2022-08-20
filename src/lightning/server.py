@@ -4,7 +4,7 @@ import queue
 
 import socket
 import ipaddress
-import select
+from typing import Union, Optional
 from ssl import SSLContext
 
 import time
@@ -13,7 +13,120 @@ import traceback
 import logging
 
 from . import utility
-from .structs import WorkerType, Node, Request, Response, worker_run
+from .structs import Request, Response
+from .interfaces import Node
+
+WorkerType = Union[threading.Thread, multiprocessing.Process]
+
+
+class ConnectionPool:
+    def __init__(self, timeout: int = 75, max_conn: int = float('inf'), clean_threshold: int = None):
+        self.timeout = timeout
+        self.max_conn = max_conn
+        if clean_threshold is None:
+            self.clean_threshold = int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
+
+        self._pool: dict[socket.socket, list] = {}
+        self.active_conn = set()
+        self._lock = threading.Lock()
+
+    def add(self, conn: socket.socket, addr: tuple):
+        with self._lock:
+            if len(self._pool) > self.clean_threshold:
+                self._clean()
+            self.active_conn.add(conn)
+            self._pool[conn] = [time.time() + self.timeout, addr]
+        logging.debug(f'{utility.format_socket(conn)} has been added to connection pool')
+
+    def is_expired(self, conn: socket.socket, timeout: int = None):
+        timeout = timeout or self.timeout
+        return (self._pool[conn][0] - self.timeout + timeout) < time.time()
+
+    def _remove(self, conn: socket.socket):
+        self._pool.pop(conn)
+        logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
+
+    def ingore(self, conn: socket.socket):
+        assert conn in self._pool
+        self.active_conn.remove(conn)
+
+    def _clean(self):
+        entries = set(self._pool.keys())
+        for s in entries:
+            if getattr(s, '_closed') == 'True' or self._pool[s][0] < time.time():
+                if s in self.active_conn:
+                    self.active_conn.remove(s)
+                self._remove(s)
+                s.close()
+
+    def _test_readable(self, conn: socket.socket):
+        prev_timeout = conn.gettimeout()
+        conn.settimeout(0.01)
+        try:
+            data = conn.recv(4)
+            if data:
+                conn.settimeout(prev_timeout)
+                return conn, self._pool[conn][1], data
+        except (TimeoutError, BlockingIOError):
+            conn.settimeout(prev_timeout)
+
+    def get(self) -> tuple[socket.socket, tuple, bytes]:
+        while True:
+            with self._lock:
+                self._clean()
+                for conn in self.active_conn:
+                    result = self._test_readable(conn)
+                    if result:
+                        return result
+                time.sleep(0.01)
+
+
+def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multiprocessing.Queue],
+               conn_pool: ConnectionPool, timeout: float = 5):
+    def process(req: Request):
+        resp = root_node.process(req)
+
+        if resp is None:
+            return
+        elif getattr(req.conn, '_closed'):
+            logging.warning(f'Connection from {req.addr} was closed before sending response')
+            return
+
+        close_conn = False
+        if not conn_pool.is_expired(req.conn):
+            resp.header['Connection'] = 'keep-alive'
+            resp.header['Keep-Alive'] = f'timeout={conn_pool.timeout}'
+        else:
+            close_conn = True
+            resp.header['Connection'] = 'close'
+
+        rest = utility.recv_all(req.conn)  # receive all unused data to make keep-alive working
+        if rest:
+            logging.warning(f'Unused data found in {utility.format_socket(req.conn)}')
+
+        resp_data = resp.generate()
+        req.conn.sendall(resp_data)
+        logging.info(f'{root_node} -> {resp} -> {utility.format_socket(req.conn)}')
+
+        if close_conn:
+            req.conn.close()
+        else:
+            conn_pool.add(req.conn, req.addr)
+
+    logging.info(f'{name} is running')
+    while True:
+        try:
+            request = req_queue.get(timeout = timeout)
+        except queue.Empty:
+            continue
+        else:
+            try:
+                process(request)
+            except Exception:
+                traceback.print_exc()
+                logging.warning('It seems that the process has not completed yet. Sending fallback response.')
+                fallback = root_node.select_target(request)[0].fallback
+                request.conn.sendall(fallback(request).generate())
 
 
 class Server:
@@ -33,7 +146,8 @@ class Server:
         :param sock: a given socket
         """
         self.is_running = False
-        self.listener = None
+        self.listener: Optional[threading.Thread] = None
+        self.receiver: Optional[threading.Thread] = None
         self.addr = sock.getsockname() if sock else server_addr
         self.max_worker = max_worker
         self._worker_index = 1
@@ -47,6 +161,7 @@ class Server:
         else:
             raise ValueError(f'"{multi_status}" is not a valid multi_status flag. Use "process" or "thread" instead.')
 
+        self.connection_pool = ConnectionPool()
         self.worker_pool: set[WorkerType] = set()
         self._is_child = self._check_process()
         self.root_node = Node(*args, **kwargs)
@@ -92,7 +207,8 @@ class Server:
     def _create_worker(self):
         name = f'Worker[{self._worker_index}]'
         worker = self.worker_type(target = run_worker, name = name, daemon = True,
-                                  kwargs = {'name': name, 'root_node': self.root_node, 'req_queue': self.queue})
+                                  kwargs = {'name': name, 'root_node': self.root_node, 'req_queue': self.queue,
+                                            'conn_pool': self.connection_pool})
         self._worker_index += 1
         return worker
 
@@ -113,6 +229,8 @@ class Server:
         logging.info(f'Listening request on {self.addr}')
         self.listener = threading.Thread(target = self.accept_conn, daemon = True)
         self.listener.start()
+        self.receiver = threading.Thread(target = self.recv_request, daemon = True)
+        self.receiver.start()
         print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
 
         if block:
@@ -133,18 +251,28 @@ class Server:
                 continue
             except OSError:
                 return  # Server has shut down
-            self.handle_request(connection, address)
+            self.connection_pool.add(connection, address)
         logging.info('Request listening stopped.')  # This should not appear in the terminal
 
-    def handle_request(self, connection, address):
+    def recv_request(self):
+        while self.is_running:
+            try:
+                conn, addr, readed = self.connection_pool.get()
+            except (ConnectionResetError, ConnectionAbortedError):
+                continue
+            self.handle_request(conn, addr, readed)
+            self.connection_pool.ingore(conn)
+
+    def handle_request(self, connection, address, readed: bytes = b''):
         """
         Construct an HTTP request object and put it into the request queue\n
+        :param readed: bytes that already readed from connection
         :param connection: a socket object which is connected to HTTP Client
         :param address: address of client socket
         """
         try:
-            request = Request(addr = address,
-                              **utility.parse_req(utility.recv_request_head(connection)), conn = connection)
+            content = readed + utility.recv_request_head(connection)
+            request = Request(addr = address, **utility.parse_req(content), conn = connection)
             self.queue.put(request)
         except ValueError:
             traceback.print_exc()
@@ -200,6 +328,9 @@ class Server:
         if self.listener.is_alive():
             logging.info('Terminating connection listener...')
             _terminate(self.listener)
+        if self.receiver.is_alive():
+            logging.info('Terminating request receiver...')
+            _terminate(self.receiver)
         logging.info(f'{self} closed successfully.')
 
     def __enter__(self):
