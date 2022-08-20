@@ -46,15 +46,8 @@ def format_header(header: str) -> str:
     return '-'.join(map(lambda x: x.capitalize(), header.split('-')))
 
 
-def recv_request_line(conn: socket.socket) -> bytes:
-    """Receive the request line (like GET / HTTP/1.1)"""
-    stack = conn.recv(16)
-    while b'\r\n' not in stack:
-        current_recv = conn.recv(1)
-        stack += current_recv
-        if not current_recv:
-            break
-    return stack.split(b'\r\n')[0]
+def format_socket(conn: socket.socket):
+    return f'{conn.getpeername()}[{conn.fileno()}]'
 
 
 def recv_request_head(conn: socket.socket) -> bytes:
@@ -163,5 +156,4 @@ HTTP_CODE = {
     600: "Unparseable Response Headers"
 }
 Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS']
-__all__ = ['recv_request_line', 'recv_request_head', 'recv_all', 'parse_req', 'HTTP_CODE', 'Method',
-           'CaseInsensitiveDict']
+__all__ = ['recv_request_head', 'recv_all', 'parse_req', 'format_socket', 'HTTP_CODE', 'Method', 'CaseInsensitiveDict']
