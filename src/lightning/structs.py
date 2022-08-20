@@ -110,7 +110,7 @@ class Response:
     def create_from(obj: Union['Sendable', int], **kwargs):
         """Convert a Sendable object into a Response object"""
         if obj is None:
-            return Response(**kwargs)
+            return None
         if isinstance(obj, Response):
             return obj
         elif isinstance(obj, (str, bytes)):
