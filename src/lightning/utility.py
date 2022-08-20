@@ -50,9 +50,9 @@ def format_socket(conn: socket.socket):
     return f'{conn.getpeername()}[{conn.fileno()}]'
 
 
-def recv_request_head(conn: socket.socket) -> bytes:
+def recv_request_head(conn: socket.socket, readed: bytes = b'') -> bytes:
     """Receive HTTP header (like Host: localhost)"""
-    stack = conn.recv(4)
+    stack = readed
     while b'\r\n\r\n' not in stack:
         current_recv = conn.recv(1)
         stack += current_recv
@@ -61,13 +61,19 @@ def recv_request_head(conn: socket.socket) -> bytes:
     return stack.split(b'\r\n\r\n')[0]
 
 
-def recv_all(conn: socket.socket, buffer: int = 1024) -> bytes:
+def recv_all(conn: socket.socket, buffer: int = 1024, blocking: bool = False) -> bytes:
     """Receive all data"""
+    block_status = conn.getblocking()
+    conn.setblocking(blocking)
     content = b''
     c = True
-    while c:
-        c = conn.recv(buffer)
-        content += c
+    try:
+        while c:
+            c = conn.recv(buffer)
+            content += c
+    except BlockingIOError:
+        pass
+    conn.setblocking(block_status)
     return content
 
 
