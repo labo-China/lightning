@@ -40,24 +40,24 @@ class ConnectionPool:
 
     def is_expired(self, conn: socket.socket, timeout: int = None):
         timeout = timeout or self.timeout
-        return (self._pool[conn][0] - self.timeout + timeout) < time.time()
+        return conn not in self or (self._pool[conn][0] - self.timeout + timeout) < time.time()
 
     def _remove(self, conn: socket.socket):
         self._pool.pop(conn)
         logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
 
     def ingore(self, conn: socket.socket):
-        assert conn in self._pool
+        assert conn in self
         self.active_conn.remove(conn)
 
     def _clean(self):
         entries = set(self._pool.keys())
-        for s in entries:
-            if getattr(s, '_closed') == 'True' or self._pool[s][0] < time.time():
-                if s in self.active_conn:
-                    self.active_conn.remove(s)
-                self._remove(s)
-                s.close()
+        for conn in entries:
+            if getattr(conn, '_closed') or self.is_expired(conn):
+                if conn in self.active_conn:
+                    self.active_conn.remove(conn)
+                self._remove(conn)
+                conn.close()
 
     def _test_readable(self, conn: socket.socket):
         prev_timeout = conn.gettimeout()
@@ -80,29 +80,38 @@ class ConnectionPool:
                         return result
                 time.sleep(0.01)
 
+    def __contains__(self, item):
+        return item in self._pool
+
 
 def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multiprocessing.Queue],
                conn_pool: ConnectionPool, timeout: float = 5):
     def process(req: Request):
         resp = root_node.process(req)
 
-        if resp is None:
+        if getattr(req.conn, '_closed'):
+            if resp is not None:
+                logging.warning(f'Connection from {req.addr} was closed before sending response')
             return
-        elif getattr(req.conn, '_closed'):
-            logging.warning(f'Connection from {req.addr} was closed before sending response')
-            return
-
-        close_conn = False
-        if not conn_pool.is_expired(req.conn):
-            resp.header['Connection'] = 'keep-alive'
-            resp.header['Keep-Alive'] = f'timeout={conn_pool.timeout}'
-        else:
-            close_conn = True
-            resp.header['Connection'] = 'close'
 
         rest = utility.recv_all(req.conn)  # receive all unused data to make keep-alive working
         if rest:
-            logging.warning(f'Unused data found in {utility.format_socket(req.conn)}')
+            logging.warning(f'Unused data found in {utility.format_socket(req.conn)}: {rest}')
+
+        if resp is None:
+            conn_pool.add(req.conn, req.addr)
+            return
+
+        close_conn = False
+        if not resp.header.get('Connection') and not req.header.get('Connection'):
+            if not conn_pool.is_expired(req.conn):
+                resp.header['Connection'] = 'keep-alive'
+                resp.header['Keep-Alive'] = f'timeout={conn_pool.timeout}'
+            else:
+                close_conn = True
+                resp.header['Connection'] = 'close'
+        elif resp.header.get('Connection') == 'close' or req.header.get('Connection') == 'close':
+            close_conn = True
 
         resp_data = resp.generate()
         req.conn.sendall(resp_data)
