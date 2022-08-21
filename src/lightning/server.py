@@ -105,6 +105,7 @@ def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multipr
             logging.warning(f'Unused data found in {utility.format_socket(req.conn)}: {rest}')
 
         if resp is None:
+            logging.info(f'{root_node} -> ... -> {utility.format_socket(req.conn)}')
             conn_pool.add(req.conn, req.addr)
             return
 
@@ -186,7 +187,7 @@ class Server:
             self.connection_pool = ConnectionPool(timeout = keep_alive)
         self.worker_pool: set[WorkerType] = set()
         self._is_child = self._check_process()
-        self.root_node = Node(desc = 'root_node', *args, **kwargs)
+        self.root_node = Node(desc = 'root_node', **kwargs)
         self.bind = self.root_node.bind  # create an alias
         if self._is_child:
             return  # not to initialize socket
@@ -299,6 +300,7 @@ class Server:
             content = readed + utility.recv_request_head(connection)
             request = Request(addr = address, **utility.parse_req(content), conn = connection)
             self.queue.put(request)
+            logging.debug(f'{request} <- {utility.format_socket(request.conn)}')
         except ValueError:
             traceback.print_exc()
             try:
