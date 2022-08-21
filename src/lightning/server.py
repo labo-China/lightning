@@ -141,17 +141,21 @@ def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multipr
 class Server:
     """The HTTP server class"""
 
-    def __init__(self, server_addr: tuple[str, int] = ('', 80), max_listen: int = 100,
-                 timeout: int = None, max_worker: int = 4, multi_status: str = 'thread', ssl_cert: str = None,
-                 sock: socket.socket = None, *args, **kwargs):
+    def __init__(self, server_addr: tuple[str, int] = ('', 80), *, max_listen: int = 0, timeout: int = None,
+                 ssl_cert: str = None, max_worker: int = 4, multi_status: str = 'thread', reuse_port: bool = None,
+                 reuse_addr: bool = True, dualstack: bool = None, keep_alive: Union[int, bool] = 75,
+                 sock: socket.socket = None, **kwargs):
         """
         :param server_addr: the address of server (host, port)
-        :param max_listen: max size of listener queue
-        :param timeout: timeout for interrupting server
+        :param max_listen: max size of listener queue (0 for default value)
+        :param timeout: timeout for server socket
+        :param ssl_cert: SSL certificate content
         :param max_worker: max size of worker queue
         :param multi_status: specify if this server use single processing or mulit-thread processing
-        :param ssl_cert: SSL certificate content
-        :param conn_famliy: address format
+        :param keep_alive: timeout for Keep-Alive in HTTP/1.1. Set it to 'False' to disable it.
+        :param reuse_port: whether server socket reuse port (set SO_REUSEPORT to 1)
+        :param reuse_addr: whether server socket reuse address (set SO_REUSEADDR to 1)
+        :param dualstack: whether server use IPv6 dualstack if possible
         :param sock: a given socket
         """
         self.is_running = False
@@ -181,11 +185,14 @@ class Server:
         if sock:
             self._sock = sock
         else:
-            self._sock = socket.socket(self._get_socket_family())
+            if dualstack is None:
+                dualstack = self._get_socket_family() == socket.AF_INET6 and socket.has_dualstack_ipv6()
+            if reuse_port is None:
+                reuse_port = hasattr(socket, 'SO_REUSEPORT')
+            self._sock = socket.create_server(server_addr, family = self._get_socket_family(), backlog = max_listen,
+                                              reuse_port = reuse_port, dualstack_ipv6 = dualstack)
             self._sock.settimeout(timeout)
-            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self._sock.bind(server_addr)
-            self._sock.listen(max_listen)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, int(reuse_addr))
 
         if ssl_cert:
             ssl_context = SSLContext()
