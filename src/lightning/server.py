@@ -53,7 +53,8 @@ class ConnectionPool:
         if conn in self.active_conn:
             self.active_conn.remove(conn)
         self._pool.pop(conn)
-        logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
+        if not getattr(conn, '_closed'):
+            logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
 
     def ingore(self, conn: socket.socket):
         assert conn in self
