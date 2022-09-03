@@ -152,7 +152,7 @@ class Interface:
             if a Response object is returned
         :param post: things to do after the function processed request
         """
-        if not get_or_method:
+        if get_or_method is None:
             self.methods = {}
         elif isinstance(get_or_method, dict):
             self.methods = get_or_method
@@ -186,7 +186,7 @@ class Interface:
             return Response(400)  # incorrect request method
 
         handler = self.methods.get(method)
-        if handler:
+        if handler is not None:
             return handler(request)
         else:
             if method in self.default_methods:
