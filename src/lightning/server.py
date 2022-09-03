@@ -42,7 +42,7 @@ class ConnectionPool:
 
     def _is_expired(self, conn: socket.socket, timeout: int = None):
         timeout = timeout or self.timeout
-        return (self._pool[conn][0] - self.timeout + timeout) < time.time()
+        return (self._pool[conn][0] - self.timeout + timeout) < time.time() or getattr(conn, '_closed')
 
     def is_expired(self, conn: socket.socket, timeout: int = None):
         if not self.keep_alive:  # always tell outside world a socket is expired when Keep-Alive is disabled
