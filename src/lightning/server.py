@@ -56,10 +56,6 @@ class ConnectionPool:
         if not getattr(conn, '_closed'):
             logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
 
-    def ingore(self, conn: socket.socket):
-        assert conn in self
-        self.active_conn.remove(conn)
-
     def _clean(self):
         entries = set(self._pool.keys())
         for conn in entries:
@@ -84,8 +80,9 @@ class ConnectionPool:
                 for conn in self.active_conn:
                     result = self._test_readable(conn)
                     if result:
+                        self.active_conn.remove(conn)  # to prevent a currently used socket being used by others again
                         return result
-                time.sleep(0.01)
+            time.sleep(0.01)
 
     def __contains__(self, item):
         return item in self._pool
@@ -288,7 +285,6 @@ class Server:
             except (ConnectionResetError, ConnectionAbortedError):
                 continue
             self.handle_request(conn, addr, readed)
-            self.connection_pool.ingore(conn)
 
     def handle_request(self, connection, address, readed: bytes = b''):
         """
