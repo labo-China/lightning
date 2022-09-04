@@ -34,6 +34,7 @@ class ConnectionPool:
     def add(self, conn: socket.socket, addr: tuple):
         with self._lock:
             if len(self._pool) > self.clean_threshold:
+                logging.debug(f'connections count ({len(self._pool)}) has reached threshold. performing cleaning')
                 self._clean()
             self.active_conn.add(conn)
             self._pool[conn] = [time.time() + self.timeout, addr]
@@ -55,6 +56,7 @@ class ConnectionPool:
 
     def _clean(self):
         entries = set(self._pool.keys())
+        logging.debug(f'performing cleaning in connection pool: {set(utility.format_socket(c) for c in entries)}')
         for conn in entries:
             if getattr(conn, '_closed') or self._is_expired(conn):
                 self._remove(conn)
@@ -65,9 +67,10 @@ class ConnectionPool:
         try:
             data = conn.recv(4)
             if data:
-                conn.settimeout(prev_timeout)
                 return conn, self._pool[conn][1], data
         except (TimeoutError, BlockingIOError):
+            return None
+        finally:
             conn.settimeout(prev_timeout)
 
     def _get(self) -> tuple[socket.socket, tuple, bytes]:
