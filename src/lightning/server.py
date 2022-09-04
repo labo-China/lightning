@@ -208,9 +208,9 @@ class Server:
             ssl_context.load_cert_chain(ssl_cert)
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
 
-    def _get_socket_family(self, default = socket.AF_INET):
-        if not self.addr[0]:
-            return default
+    def _get_socket_family(self):
+        if self.addr[0] == '':
+            return socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET
         addr = ipaddress.ip_address(self.addr[0])
         return socket.AF_INET if isinstance(addr, ipaddress.IPv4Address) else socket.AF_INET6
 
