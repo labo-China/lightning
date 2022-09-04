@@ -21,10 +21,9 @@ WorkerType = Union[threading.Thread, multiprocessing.Process]
 
 class ConnectionPool:
     def __init__(self, timeout: int = 75, max_conn: int = float('inf'),
-                 clean_threshold: int = None, keep_alive: bool = True):
+                 clean_threshold: int = None):
         self.timeout = timeout
         self.max_conn = max_conn
-        self.keep_alive = keep_alive
         if clean_threshold is None:
             self.clean_threshold = int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
 
@@ -45,8 +44,6 @@ class ConnectionPool:
         return (self._pool[conn][0] - self.timeout + timeout) < time.time() or getattr(conn, '_closed')
 
     def is_expired(self, conn: socket.socket, timeout: int = None):
-        if not self.keep_alive:  # always tell outside world a socket is expired when Keep-Alive is disabled
-            return False
         return conn not in self or self._is_expired(conn, timeout)
 
     def _remove(self, conn: socket.socket):
@@ -73,16 +70,20 @@ class ConnectionPool:
         except (TimeoutError, BlockingIOError):
             conn.settimeout(prev_timeout)
 
-    def get(self) -> tuple[socket.socket, tuple, bytes]:
+    def _get(self) -> tuple[socket.socket, tuple, bytes]:
         while True:
             with self._lock:
-                self._clean()
                 for conn in self.active_conn:
                     result = self._test_readable(conn)
                     if result:
-                        self.active_conn.remove(conn)  # to prevent a currently used socket being used by others again
                         return result
             time.sleep(0.01)
+
+    def get(self) -> tuple[socket.socket, tuple, bytes]:
+        ret = self._get()
+        self.active_conn.remove(ret[0])  # to prevent a used socket being used by others again
+        self._clean()
+        return ret
 
     def __contains__(self, item):
         return item in self._pool
@@ -148,7 +149,7 @@ class Server:
 
     def __init__(self, server_addr: tuple[str, int] = ('', 80), *, max_listen: int = 0, timeout: int = None,
                  ssl_cert: str = None, max_worker: int = 4, multi_status: str = 'thread', reuse_port: bool = None,
-                 reuse_addr: bool = True, dualstack: bool = None, keep_alive: Union[int, bool] = 75,
+                 reuse_addr: bool = True, dualstack: bool = None, keep_alive_timeout: int = 75,
                  sock: socket.socket = None, **kwargs):
         """
         :param server_addr: the address of server (host, port)
@@ -157,7 +158,7 @@ class Server:
         :param ssl_cert: SSL certificate content
         :param max_worker: max size of worker queue
         :param multi_status: specify if this server use single processing or mulit-thread processing
-        :param keep_alive: timeout for Keep-Alive in HTTP/1.1. Set it to 'False' to disable it.
+        :param keep_alive_timeout: timeout for Keep-Alive in HTTP/1.1. Set it to 0 to disable it.
         :param reuse_port: whether server socket reuse port (set SO_REUSEPORT to 1)
         :param reuse_addr: whether server socket reuse address (set SO_REUSEADDR to 1)
         :param dualstack: whether server use IPv6 dualstack if possible
@@ -179,10 +180,7 @@ class Server:
         else:
             raise ValueError(f'"{multi_status}" is not a valid multi_status flag. Use "process" or "thread" instead.')
 
-        if isinstance(keep_alive, bool):
-            self.connection_pool = ConnectionPool(keep_alive = keep_alive)
-        elif isinstance(keep_alive, int):
-            self.connection_pool = ConnectionPool(timeout = keep_alive)
+        self.connection_pool = ConnectionPool(timeout = keep_alive_timeout)
         self.worker_pool: set[WorkerType] = set()
         self._is_child = self._check_process()
         self.root_node = Node(desc = 'root_node', **kwargs)
