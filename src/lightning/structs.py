@@ -1,4 +1,6 @@
+import copy
 import logging
+import pathlib
 import socket
 import time
 import traceback
@@ -255,4 +257,90 @@ class Interface:
         return template.format('|'.join(method_map))
 
 
-__all__ = ['Request', 'Response', 'Interface', 'Responsive', 'Sendable']
+class Node(Interface):
+    """An interface that provides a main-interface to carry sub-Interfaces."""
+
+    def __init__(self, interface_map: dict[str, Interface] = None,
+                 interface_callback: Callable[[], dict[str, Interface]] = None,
+                 default: Responsive = Response(404), *args, **kwargs):
+        """
+        :param interface_map: initral mapping for interfaces
+        :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
+        :param default: the final interface when no interfaces were matched
+        """
+        super().__init__(generic = self._process, *args, **kwargs)
+        self.map_static: dict[str, Interface] = interface_map or {}
+        self.map_callback = interface_callback
+        self.default = default
+        self.last_call: str = ''
+
+    def select_target(self, request: Request) -> tuple[Interface, Request]:
+        """Select the matched interface then return it with adjusted request"""
+        interface_map = self.get_map()
+        req_path = pathlib.PurePosixPath(request.path)
+
+        for bound_path in sorted(interface_map.keys(), key = lambda x: (x.count('/'), x), reverse = True):
+            # sort it to make interface_map like ['/foo/bar', '/foo', '/goo', '/']
+            if req_path.is_relative_to(bound_path):
+                target = interface_map[bound_path]
+                path = request.path.removeprefix(bound_path)
+                new_req = copy.copy(request)
+                if path == '.':
+                    new_req.path = ''
+                elif path and not path.startswith('/'):
+                    new_req.path = '/' + path
+                else:
+                    new_req.path = path
+                return target, new_req
+        else:
+            return Interface.create_from(self.default), request
+
+    def _process(self, request: Request) -> Sendable:
+        target, request = self.select_target(request)
+        self.last_call = repr(target)
+        return target(request)
+
+    def get_map(self) -> dict[str, Interface]:
+        """Return interface map as a dictonary"""
+        if not self.map_callback:
+            return self.map_static
+        return dict({**self.map_static, **self.map_callback()})
+
+    def bind(self, pattern: str, interface_or_method: Union[Interface, list[Method]] = None, *args, **kwargs):
+        r"""
+        Bind an interface or function into this node.
+        :param pattern: the url prefix to match requests.
+        :param interface_or_method: If the function is called as a normal function, the value is the Interface
+            needs to bind. If the function is called as a decorator or the value is None, the value is expected
+            HTTP methods list. If the value is None, it means the Interface will be a GET handler by default.
+        """
+        if pattern and not pattern.startswith('/'):
+            pattern = '/' + pattern
+        if pattern != '/':
+            pattern = pattern.removesuffix('/')
+        if isinstance(interface_or_method, Interface) or hasattr(interface_or_method, '__call__'):
+            # called as a normal function
+            self.map_static[pattern] = interface_or_method
+            logging.info(f'{interface_or_method} is bound on {pattern}')
+            return
+
+        def decorator(func):  # called as a decorator
+            if interface_or_method is not None:
+                parameter = dict.fromkeys(interface_or_method, func)
+                self.bind(pattern, Interface(get_or_method = parameter, *args, **kwargs))
+            else:
+                self.bind(pattern, Interface(func, *args, **kwargs))
+            return func  # return the given function to keep it
+
+        return decorator
+
+    def __repr__(self) -> str:
+        if self.last_call:
+            ret = self.last_call
+            self.last_call = ''
+        else:
+            ret = super().__repr__()
+        return ret
+
+
+__all__ = ['Request', 'Response', 'Interface', 'Responsive', 'Sendable', 'Node']

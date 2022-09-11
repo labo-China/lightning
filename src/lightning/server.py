@@ -13,8 +13,7 @@ import traceback
 import logging
 
 from . import utility
-from .structs import Request, Response
-from .interfaces import Node
+from .structs import Request, Response, Node
 
 WorkerType = Union[threading.Thread, multiprocessing.Process]
 
