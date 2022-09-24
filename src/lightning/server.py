@@ -1,4 +1,5 @@
 import multiprocessing
+import select
 import threading
 import queue
 
@@ -27,22 +28,22 @@ class ConnectionPool:
         if clean_threshold is None:
             self.clean_threshold = int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
 
-        self._pool: dict[socket.socket, list] = {}
+        self.table: dict[socket.socket, float] = {}
         self.active_conn = set()
         self._lock = threading.Lock()
 
-    def add(self, conn: socket.socket, addr: tuple):
+    def add(self, conn: socket.socket):
         with self._lock:
-            if len(self._pool) > self.clean_threshold:
-                logging.debug(f'connections count ({len(self._pool)}) has reached threshold. performing cleaning')
+            if len(self.table) > self.clean_threshold:
+                logging.debug(f'connections count ({len(self.table)}) has reached threshold. performing cleaning')
                 self._clean()
             self.active_conn.add(conn)
-            self._pool[conn] = [time.time() + self.timeout, addr]
+            self.table[conn] = time.time() + self.timeout
         logging.debug(f'{utility.format_socket(conn)} has been added to connection pool')
 
     def _is_expired(self, conn: socket.socket, timeout: int = None):
         timeout = timeout or self.timeout
-        return (self._pool[conn][0] - self.timeout + timeout) < time.time() or getattr(conn, '_closed')
+        return (self.table[conn] - self.timeout + timeout) < time.time() or getattr(conn, '_closed')
 
     def is_expired(self, conn: socket.socket, timeout: int = None):
         return conn not in self or self._is_expired(conn, timeout)
@@ -50,46 +51,33 @@ class ConnectionPool:
     def _remove(self, conn: socket.socket):
         if conn in self.active_conn:
             self.active_conn.remove(conn)
-        self._pool.pop(conn)
+        self.table.pop(conn)
         if not getattr(conn, '_closed'):
             logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
 
     def _clean(self):
-        entries = set(self._pool.keys())
-        logging.debug(f'performing cleaning in connection pool: {set(utility.format_socket(c) for c in entries)}')
-        for conn in entries:
+        logging.debug(f'performing cleaning in connection pool: {set(utility.format_socket(c) for c in self.table)}')
+        for conn in self.table:
             if getattr(conn, '_closed') or self._is_expired(conn):
                 self._remove(conn)
 
-    def _test_readable(self, conn: socket.socket):
-        prev_timeout = conn.gettimeout()
-        conn.settimeout(0.01)
-        try:
-            data = conn.recv(4)
-            if data:
-                return conn, self._pool[conn][1], data
-        except (TimeoutError, BlockingIOError):
-            return None
-        finally:
-            conn.settimeout(prev_timeout)
-
-    def _get(self) -> tuple[socket.socket, tuple, bytes]:
+    def get(self):
         while True:
-            with self._lock:
-                for conn in self.active_conn:
-                    result = self._test_readable(conn)
-                    if result:
-                        return result
-            time.sleep(0.01)
-
-    def get(self) -> tuple[socket.socket, tuple, bytes]:
-        ret = self._get()
-        self.active_conn.remove(ret[0])  # to prevent a used socket being used by others again
-        self._clean()
-        return ret
+            if not self.active_conn:
+                time.sleep(0.05)
+                continue
+            for rl in select.select(self.active_conn, [], [], ):
+                for r in rl:
+                    buf = r.recv(4)
+                    self.active_conn.remove(r)
+                    if self._is_expired(r) or buf == b'':
+                        self.table.pop(r)  # remove expired or closed connection
+                        if buf == b'':
+                            continue
+                    return r, r.getpeername(), buf
 
     def __contains__(self, item):
-        return item in self._pool
+        return item in self.table
 
 
 def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multiprocessing.Queue],
@@ -108,7 +96,7 @@ def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multipr
 
         if resp is None:
             logging.info(f'{root_node} -> ... -> {utility.format_socket(req.conn)}')
-            conn_pool.add(req.conn, req.addr)
+            conn_pool.add(req.conn)
             return
 
         close_conn = False
@@ -129,7 +117,7 @@ def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multipr
         if close_conn:
             req.conn.close()
         else:
-            conn_pool.add(req.conn, req.addr)
+            conn_pool.add(req.conn)
 
     logging.info(f'{name} is running')
     while True:
@@ -270,13 +258,13 @@ class Server:
         """Accept TCP requests from listening ports"""
         while self.is_running:
             try:
-                connection, address = self._sock.accept()
+                connection, _ = self._sock.accept()
                 logging.debug(f'<-{utility.format_socket(connection)}')
             except socket.timeout:
                 continue
             except OSError:
                 return  # Server has shut down
-            self.connection_pool.add(connection, address)
+            self.connection_pool.add(connection)
         logging.info('Request listening stopped.')  # This should not appear in the terminal
 
     def recv_request(self):

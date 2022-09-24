@@ -47,7 +47,7 @@ def format_header(header: str) -> str:
 
 
 def format_socket(conn: socket.socket):
-    return f'{conn.getpeername()}[{conn.fileno()}]'
+    return f'{conn.getpeername()}[{conn.fileno()}]' if not getattr(conn, '_closed') else '[closed]'
 
 
 def recv_request_head(conn: socket.socket, readed: bytes = b'') -> bytes:
