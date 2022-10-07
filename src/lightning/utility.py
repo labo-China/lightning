@@ -1,4 +1,5 @@
 import socket
+import ipaddress
 from urllib.parse import unquote
 from typing import Literal
 
@@ -109,6 +110,13 @@ def parse_req(content: bytes) -> dict:
             'arg': arg, 'version': ver, 'header': header, 'query': '?' + param if param else ''}
 
 
+def get_socket_family(address):
+    if address[0] == '':
+        return socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET
+    addr = ipaddress.ip_address(address[0])
+    return socket.AF_INET if isinstance(addr, ipaddress.IPv4Address) else socket.AF_INET6
+
+
 HTTP_CODE = {
     100: "Continue",
     101: "Switching Protocols",
@@ -169,4 +177,5 @@ HTTP_CODE = {
     600: "Unparseable Response Headers"
 }
 Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS']
-__all__ = ['recv_request_head', 'recv_all', 'parse_req', 'format_socket', 'HTTP_CODE', 'Method', 'CaseInsensitiveDict']
+__all__ = ['recv_request_head', 'recv_all', 'parse_req', 'format_socket', 'get_socket_family',
+           'HTTP_CODE', 'Method', 'CaseInsensitiveDict']

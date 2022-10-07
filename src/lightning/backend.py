@@ -223,6 +223,26 @@ class ThreadPoolBackend(BasePoolBackend):
 class ProcessPoolBackend(BasePoolBackend):
     def __init__(self, max_worker: int = None, *args, **kwargs):
         super().__init__(futures.ProcessPoolExecutor(max_workers = max_worker), *args, **kwargs)
+        self._is_child = self._is_child_process()
+
+    def _is_child_process(self):
+        """Check whether the server is started as a child process"""
+        tester = socket.socket(utility.get_socket_family(self.sock.getsockname()))
+        try:
+            tester.bind(self.addr)
+        except OSError:
+            logging.info(f'The server is a child process. Ignoring all operations...')
+            return True
+        finally:
+            tester.close()
+        return False
+
+    def start(self, *args, **kwargs):
+        if self._is_child:
+            logging.warning('The server instance is a child process, and it will NOT run!!!\n'
+                            'Put the init statement under the protection of "if-main" may help.')
+            return
+        super().start(*args, **kwargs)
 
 
-__all__ = ['ConnectionPool', 'BaseBackend']
+__all__ = ['ConnectionPool', 'BaseBackend', 'BasePoolBackend', 'ThreadPoolBackend', 'ProcessPoolBackend']
