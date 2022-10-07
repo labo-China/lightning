@@ -47,7 +47,14 @@ def format_header(header: str) -> str:
 
 
 def format_socket(conn: socket.socket):
-    return f'{conn.getpeername()}[{conn.fileno()}]'
+    try:
+        conn.getsockname()
+    except OSError:  # socket is closed
+        return '[CLOSED]'
+    try:
+        return f'{conn.getpeername()}[{conn.fileno()}]'
+    except OSError:  # server socket
+        return f'{conn.getsockname()}[{conn.fileno()}][SERVER]'
 
 
 def recv_request_head(conn: socket.socket, readed: bytes = b'') -> bytes:

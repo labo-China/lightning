@@ -2,8 +2,11 @@ import abc
 import logging
 import socket
 import threading
+import select
+import traceback
 import time
 
+from concurrent import futures
 from . import utility
 from .structs import Node, Request, Response
 
@@ -16,76 +19,68 @@ class ConnectionPool:
         if clean_threshold is None:
             self.clean_threshold = int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
 
-        self._pool: dict[socket.socket, list] = {}
+        self.table: dict[socket.socket, float] = {}
         self.active_conn = set()
-        self._lock = threading.Lock()
 
-    def add(self, conn: socket.socket, addr: tuple):
-        with self._lock:
-            if len(self._pool) > self.clean_threshold:
-                logging.debug(f'connections count ({len(self._pool)}) has reached threshold. performing cleaning')
-                self._clean()
-            self.active_conn.add(conn)
-            self._pool[conn] = [time.time() + self.timeout, addr]
+    def add(self, conn: socket.socket, forever: bool = False):
+        if len(self.table) > self.clean_threshold:
+            logging.debug(f'connections count ({len(self.table)}) has reached threshold. performing cleaning')
+            self.clean()
+        self.active_conn.add(conn)
+        self.table[conn] = time.time() + self.timeout if not forever else None
         logging.debug(f'{utility.format_socket(conn)} has been added to connection pool')
 
-    def _is_expired(self, conn: socket.socket, timeout: int = None):
-        timeout = timeout or self.timeout
-        return (self._pool[conn][0] - self.timeout + timeout) < time.time() or getattr(conn, '_closed')
-
-    def is_expired(self, conn: socket.socket, timeout: int = None):
-        return conn not in self or self._is_expired(conn, timeout)
-
-    def _remove(self, conn: socket.socket):
+    def remove(self, conn: socket.socket):
         if conn in self.active_conn:
             self.active_conn.remove(conn)
-        self._pool.pop(conn)
+        self.table.pop(conn)
         if not getattr(conn, '_closed'):
             logging.debug(f'{utility.format_socket(conn)} is removed from connection pool')
 
-    def _clean(self):
-        entries = set(self._pool.keys())
-        logging.debug(f'performing cleaning in connection pool: {set(utility.format_socket(c) for c in entries)}')
-        for conn in entries:
-            if getattr(conn, '_closed') or self._is_expired(conn):
-                self._remove(conn)
+    def is_expired(self, conn: socket.socket, timeout: int = None):
+        timeout = timeout or self.timeout
+        if self.table[conn] is None:  # permanent socket never expires
+            return False
+        elif getattr(conn, '_closed') or conn not in self:  # closed socket is treated as expired
+            return True
+        elif (self.table[conn] - self.timeout + timeout) < time.time():  # normally expired
+            return True
+        return False
 
-    def _test_readable(self, conn: socket.socket):
-        prev_timeout = conn.gettimeout()
-        conn.settimeout(0.01)
-        try:
-            data = conn.recv(4)
-            if data:
-                return conn, self._pool[conn][1], data
-        except (TimeoutError, BlockingIOError):
-            return None
-        finally:
-            conn.settimeout(prev_timeout)
+    def clean(self):
+        logging.debug(f'performing cleaning in connection pool: {set(utility.format_socket(c) for c in self.table)}')
+        for conn in self.table:
+            if self.is_expired(conn):
+                self.remove(conn)
 
-    def _get(self) -> tuple[socket.socket, tuple, bytes]:
+    def get(self) -> socket.socket:
         while True:
-            with self._lock:
-                for conn in self.active_conn:
-                    result = self._test_readable(conn)
-                    if result:
-                        return result
-            time.sleep(0.01)
+            if not self.active_conn:
+                time.sleep(0.05)
+                continue
+            for rl in select.select(self.active_conn, [], [], 5):
+                for r in rl:
+                    if self.table[r] is not None:
+                        self.active_conn.remove(r)
+                    if self.is_expired(r):
+                        self.table.pop(r)
+                    return r
 
-    def get(self) -> tuple[socket.socket, tuple, bytes]:
-        ret = self._get()
-        self.active_conn.remove(ret[0])  # to prevent a used socket being used by others again
-        self._clean()
-        return ret
+    def close(self):
+        """Remove and close all connections in the pool"""
+        self.active_conn.clear()
+        self.table.clear()
 
     def __contains__(self, item):
-        return item in self._pool
+        return item in self.table
 
 
 class BaseBackend(abc.ABC):
-    def __init__(self, sock: socket.socket, root_node: Node, conn_pool: ConnectionPool):
+    def __init__(self, sock: socket.socket, root_node: Node, conn_pool: ConnectionPool, *args, **kwargs):
         self.sock = sock
         self.root_node = root_node
         self.conn_pool = conn_pool
+        self.conn_pool.add(sock, forever = True)
         self.is_running = False
 
     def run(self, *args, **kwargs):
@@ -101,34 +96,55 @@ class BaseBackend(abc.ABC):
 
     @abc.abstractmethod
     def interrupt(self):
+        """Interrupt the backend and stop receiving incoming requests.\n
+        The backend can start again."""
         raise NotImplemented
 
-    @abc.abstractmethod
     def terminate(self):
-        raise NotImplemented
+        """Terminate the backend and close the main connection."""
+        self.interrupt()
+        self.conn_pool.close()
+        self.sock.close()
 
-    def process_request(self, req: Request):
-        resp = self.root_node.process(req)
+    def get_active_conn(self):
+        while True:
+            sock = self.conn_pool.get()
+            if sock is None:
+                return  # because pool is closed
+            elif sock is self.sock:
+                new_conn, _ = sock.accept()
+                self.conn_pool.add(new_conn)
+                continue
 
-        if getattr(req.conn, '_closed'):
+            buf = sock.recv(4)
+            if buf == b'':
+                self.conn_pool.remove(sock)  # remove inactive connections
+            else:
+                return sock, buf
+
+    def _process_request(self, request: Request):
+        """Process a request"""
+        resp = self.root_node.process(request)
+
+        if getattr(request.conn, '_closed'):
             if resp is not None:
-                logging.warning(f'Connection from {req.addr} was closed before sending response')
+                logging.warning(f'Connection from {request.addr} was closed before sending response')
             return
 
-        rest = utility.recv_all(req.conn)  # receive all unused data to make keep-alive working
+        rest = utility.recv_all(request.conn)  # receive all unused data to make keep-alive working
         if rest:
-            logging.warning(f'Unused data found in {utility.format_socket(req.conn)}: {rest}')
+            logging.warning(f'Unused data found in {utility.format_socket(request.conn)}: {rest}')
 
         if resp is None:  # assume that response is already sent
-            logging.info(f'{root_node} -> ... -> {utility.format_socket(req.conn)}')
-            self.conn_pool.add(req.conn, req.addr)
+            logging.info(f'{root_node} -> ... -> {utility.format_socket(request.conn)}')
+            self.conn_pool.add(request.conn)
             return
 
         close_conn = False
-        if resp.header.get('Connection') == 'close' or req.header.get('Connection') == 'close':
+        if resp.header.get('Connection') == 'close' or request.header.get('Connection') == 'close':
             close_conn = True
         else:
-            if not self.conn_pool.is_expired(req.conn):
+            if not self.conn_pool.is_expired(request.conn):
                 resp.header['Connection'] = 'keep-alive'
                 resp.header['Keep-Alive'] = f'timeout={self.conn_pool.timeout}'
             else:
@@ -136,18 +152,31 @@ class BaseBackend(abc.ABC):
                 resp.header['Connection'] = 'close'
 
         resp_data = resp.generate()
-        req.conn.sendall(resp_data)
-        logging.info(f'{self.root_node} -> {resp} -> {utility.format_socket(req.conn)}')
+        request.conn.sendall(resp_data)
+        logging.info(f'{self.root_node} -> {resp} -> {utility.format_socket(request.conn)}')
 
         if close_conn:
-            req.conn.close()
+            request.conn.close()
         else:
-            self.conn_pool.add(req.conn, req.addr)
+            self.conn_pool.add(request.conn)
+
+    def process_request(self, request: Request):
+        """Process a request and hold exceptions with fallback"""
+        try:
+            self._process_request(request)
+        except Exception:
+            logging.warning('It seems that the process has not completed yet. Sending fallback response.',
+                            exc_info = True)
+            fallback = self.root_node.select_target(request)[0].fallback
+            request.conn.sendall(fallback(request).generate())
 
     @staticmethod
-    def build_request(addr: tuple, conn: socket.socket, readed: bytes = None):
+    def build_request(conn: socket.socket, readed: bytes = None):
         content = readed + utility.recv_request_head(conn)
-        return Request(addr = addr, **utility.parse_req(content), conn = conn)
+        return Request(**utility.parse_req(content), conn = conn, addr = conn.getpeername())
+
+    def __del__(self):
+        self.terminate()
 
 
 class SimpleBackend(BaseBackend):
@@ -155,14 +184,45 @@ class SimpleBackend(BaseBackend):
 
     def start(self):
         while self.is_running:
-            try:
-                conn, addr = self.sock.accept()
-                self.conn_pool.add(conn, addr)
-            except ConnectionResetError:
-                continue
-            except socket.timeout:
-                continue
-            request = self.build_request(addr, conn)
+            request = self.build_request(*self.get_active_conn())
+            self.process_request(request)
+
+    def interrupt(self):
+        self.is_running = False
+
+
+class BasePoolBackend(BaseBackend):
+    """A base backend class using Pool to handle requests"""
+
+    def __init__(self, executor: futures.Executor, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.executor = executor
+
+    def start(self, *args, **kwargs):
+        while self.is_running:
+            result = self.get_active_conn()
+            if result is None:
+                break  # because the pool is closed
+            request = self.build_request(*result)
+            self.executor.submit(self.process_request, request)
+
+    def interrupt(self):
+        self.is_running = False
+
+    def terminate(self, wait: bool = False):
+        super().terminate()
+        self.executor.shutdown(wait)
+
+
+class ThreadPoolBackend(BasePoolBackend):
+    def __init__(self, max_worker: int = None, *args, **kwargs):
+        super().__init__(futures.ThreadPoolExecutor(max_workers = max_worker, thread_name_prefix = 'Worker'),
+                         *args, **kwargs)
+
+
+class ProcessPoolBackend(BasePoolBackend):
+    def __init__(self, max_worker: int = None, *args, **kwargs):
+        super().__init__(futures.ProcessPoolExecutor(max_workers = max_worker), *args, **kwargs)
 
 
 __all__ = ['ConnectionPool', 'BaseBackend']
