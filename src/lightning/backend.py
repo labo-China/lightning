@@ -99,11 +99,10 @@ class BaseBackend(abc.ABC):
     def start(self, *args, **kwargs):
         raise NotImplemented
 
-    @abc.abstractmethod
     def interrupt(self):
         """Interrupt the backend and stop receiving incoming requests.\n
         The backend can start again."""
-        raise NotImplemented
+        self.is_running = False
 
     def terminate(self):
         """Terminate the backend and close the main connection."""
@@ -134,6 +133,12 @@ class BaseBackend(abc.ABC):
             else:
                 logging.debug(f'Get active conn:{utility.format_socket(sock)}')
                 return sock, buf
+
+    def get_request(self):
+        result = self.get_active_conn()
+        if result is None:
+            return
+        return self.build_request(*result)
 
     def _process_request(self, request: Request):
         """Process a request"""
@@ -197,7 +202,9 @@ class SimpleBackend(BaseBackend):
 
     def start(self):
         while self.is_running:
-            request = self.build_request(*self.get_active_conn())
+            request = self.get_request()
+            if request is None:
+                break
             self.process_request(request)
 
 
@@ -210,14 +217,10 @@ class BasePoolBackend(BaseBackend):
 
     def start(self, *args, **kwargs):
         while self.is_running:
-            result = self.get_active_conn()
-            if result is None:
-                break  # because the pool is closed
-            request = self.build_request(*result)
+            request = self.get_request()
+            if request is None:
+                break
             self.executor.submit(self.process_request, request)
-
-    def interrupt(self):
-        self.is_running = False
 
     def terminate(self, wait: bool = False):
         super().terminate()
