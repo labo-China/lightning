@@ -112,19 +112,27 @@ class BaseBackend(abc.ABC):
         self.sock.close()
 
     def get_active_conn(self):
+        """
+        Accept incoming connections and return available connections\n
+        This could take a long time.\n
+        If you want to implement the start() method, get_request() is suggested to use instead.
+        """
         while True:
             sock = self.conn_pool.get()
             if sock is None:
                 return  # because pool is closed
             elif sock is self.sock:
                 new_conn, _ = sock.accept()
+                logging.debug(f'Accept new conn:{utility.format_socket(new_conn)}')
                 self.conn_pool.add(new_conn)
                 continue
 
             buf = sock.recv(4)
             if buf == b'':
+                logging.debug(f'Remove inactive conn:{utility.format_socket(sock)}')
                 self.conn_pool.remove(sock)  # remove inactive connections
             else:
+                logging.debug(f'Get active conn:{utility.format_socket(sock)}')
                 return sock, buf
 
     def _process_request(self, request: Request):
@@ -166,7 +174,7 @@ class BaseBackend(abc.ABC):
             self.conn_pool.add(request.conn)
 
     def process_request(self, request: Request):
-        """Process a request and hold exceptions with fallback"""
+        """Process a request and handle exceptions with fallback"""
         try:
             self._process_request(request)
         except Exception:
