@@ -7,6 +7,7 @@ import traceback
 import time
 
 from concurrent import futures
+from typing import Optional
 from . import utility
 from .structs import Node, Request, Response
 
@@ -21,6 +22,7 @@ class ConnectionPool:
 
         self.table: dict[socket.socket, float] = {}
         self.active_conn = set()
+        self.closed = False
 
     def add(self, conn: socket.socket, forever: bool = False):
         if len(self.table) > self.clean_threshold:
@@ -53,13 +55,15 @@ class ConnectionPool:
             if self.is_expired(conn):
                 self.remove(conn)
 
-    def get(self) -> socket.socket:
+    def get(self) -> Optional[socket.socket]:
         while True:
             if not self.active_conn:
                 time.sleep(0.05)
                 continue
             for rl in select.select(self.active_conn, [], [], 5):
                 for r in rl:
+                    if self.closed:
+                        return
                     if self.table[r] is not None:
                         self.active_conn.remove(r)
                     if self.is_expired(r):
@@ -68,6 +72,7 @@ class ConnectionPool:
 
     def close(self):
         """Remove and close all connections in the pool"""
+        self.closed = True
         self.active_conn.clear()
         self.table.clear()
 
@@ -186,9 +191,6 @@ class SimpleBackend(BaseBackend):
         while self.is_running:
             request = self.build_request(*self.get_active_conn())
             self.process_request(request)
-
-    def interrupt(self):
-        self.is_running = False
 
 
 class BasePoolBackend(BaseBackend):
