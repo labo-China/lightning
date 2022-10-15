@@ -7,9 +7,19 @@ import traceback
 import time
 
 from concurrent import futures
-from typing import Optional
+from typing import Optional, Type
 from . import utility
 from .structs import Node, Request, Response
+
+_BACKEND_CLS = {}
+
+
+def _register_backend(*name: str):
+    def register(cls):
+        _BACKEND_CLS.update(dict.fromkeys(name, cls))
+        return cls
+
+    return register
 
 
 class ConnectionPool:
@@ -197,6 +207,7 @@ class BaseBackend(abc.ABC):
         self.terminate()
 
 
+@_register_backend('single')
 class SimpleBackend(BaseBackend):
     """A simple backend class. It includes a minimal single-threaded implementation"""
 
@@ -227,12 +238,14 @@ class BasePoolBackend(BaseBackend):
         self.executor.shutdown(wait)
 
 
+@_register_backend('thread', 'threaded')
 class ThreadPoolBackend(BasePoolBackend):
     def __init__(self, max_worker: int = None, *args, **kwargs):
         super().__init__(futures.ThreadPoolExecutor(max_workers = max_worker, thread_name_prefix = 'Worker'),
                          *args, **kwargs)
 
 
+@_register_backend('process', 'processing')
 class ProcessPoolBackend(BasePoolBackend):
     def __init__(self, max_worker: int = None, *args, **kwargs):
         super().__init__(futures.ProcessPoolExecutor(max_workers = max_worker), *args, **kwargs)
@@ -258,4 +271,12 @@ class ProcessPoolBackend(BasePoolBackend):
         super().start(*args, **kwargs)
 
 
-__all__ = ['ConnectionPool', 'BaseBackend', 'BasePoolBackend', 'ThreadPoolBackend', 'ProcessPoolBackend']
+def get_backend_class(name: str) -> Type[BaseBackend]:
+    if name in _BACKEND_CLS:
+        return _BACKEND_CLS[name]
+    else:
+        raise ValueError(f'"{name}" is not a valid backend name.')
+
+
+__all__ = ['ConnectionPool', 'BaseBackend', 'BasePoolBackend', 'ThreadPoolBackend', 'ProcessPoolBackend',
+           'get_backend_class']
