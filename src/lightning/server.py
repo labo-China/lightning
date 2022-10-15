@@ -1,83 +1,20 @@
-import multiprocessing
 import threading
-import queue
-
 import socket
-import ipaddress
-from typing import Union, Optional
+from typing import Type
 from ssl import SSLContext
 
 import time
-import datetime
-import traceback
 import logging
 
 from . import utility, backend
-from .structs import Request, Response, Node
-
-WorkerType = Union[threading.Thread, multiprocessing.Process]
-
-
-def run_worker(name: str, root_node: Node, req_queue: Union[queue.Queue, multiprocessing.Queue],
-               conn_pool: backend.ConnectionPool, timeout: float = 5):
-    def process(req: Request):
-        resp = root_node.process(req)
-
-        if getattr(req.conn, '_closed'):
-            if resp is not None:
-                logging.warning(f'Connection from {req.addr} was closed before sending response')
-            return
-
-        rest = utility.recv_all(req.conn)  # receive all unused data to make keep-alive working
-        if rest:
-            logging.warning(f'Unused data found in {utility.format_socket(req.conn)}: {rest}')
-
-        if resp is None:
-            logging.info(f'{root_node} -> ... -> {utility.format_socket(req.conn)}')
-            conn_pool.add(req.conn, req.addr)
-            return
-
-        close_conn = False
-        if resp.header.get('Connection') == 'close' or req.header.get('Connection') == 'close':
-            close_conn = True
-        else:
-            if not conn_pool.is_expired(req.conn):
-                resp.header['Connection'] = 'keep-alive'
-                resp.header['Keep-Alive'] = f'timeout={conn_pool.timeout}'
-            else:
-                close_conn = True
-                resp.header['Connection'] = 'close'
-
-        resp_data = resp.generate()
-        req.conn.sendall(resp_data)
-        logging.info(f'{root_node} -> {resp} -> {utility.format_socket(req.conn)}')
-
-        if close_conn:
-            req.conn.close()
-        else:
-            conn_pool.add(req.conn, req.addr)
-
-    logging.info(f'{name} is running')
-    while True:
-        try:
-            request = req_queue.get(timeout = timeout)
-        except queue.Empty:
-            continue
-        else:
-            try:
-                process(request)
-            except Exception:
-                traceback.print_exc()
-                logging.warning('It seems that the process has not completed yet. Sending fallback response.')
-                fallback = root_node.select_target(request)[0].fallback
-                request.conn.sendall(fallback(request).generate())
+from .structs import Node
 
 
 class Server:
     """The HTTP server class"""
 
     def __init__(self, server_addr: tuple[str, int] = ('', 80), *, max_listen: int = 0, timeout: int = None,
-                 ssl_cert: str = None, max_worker: int = 4, multi_status: str = 'thread', reuse_port: bool = None,
+                 ssl_cert: str = None, max_worker: int = None, multi_status: str = 'thread', reuse_port: bool = None,
                  reuse_addr: bool = True, dualstack: bool = None, keep_alive_timeout: int = 75,
                  sock: socket.socket = None, **kwargs):
         """
@@ -93,39 +30,23 @@ class Server:
         :param dualstack: whether server use IPv6 dualstack if possible
         :param sock: a given socket
         """
-        self.is_running = False
-        self.listener: Optional[threading.Thread] = None
-        self.receiver: Optional[threading.Thread] = None
+        self.runner = None
         self.addr = sock.getsockname() if sock else server_addr
-        self.max_worker = max_worker
-        self._worker_index = 1
-
-        if multi_status == 'process':
-            self.worker_type = multiprocessing.Process
-            self.queue = multiprocessing.Queue()
-        elif multi_status == 'thread':
-            self.worker_type = threading.Thread
-            self.queue = queue.Queue()
-        else:
-            raise ValueError(f'"{multi_status}" is not a valid multi_status flag. Use "process" or "thread" instead.')
-
+        self.backend_cls = backend.get_backend_class(multi_status)
         self.connection_pool = backend.ConnectionPool(timeout = keep_alive_timeout)
-        self.worker_pool: set[WorkerType] = set()
-        self._is_child = self._check_process()
         self.root_node = Node(desc = 'root_node', **kwargs)
         self.bind = self.root_node.bind  # create an alias
-        if self._is_child:
-            return  # not to initialize socket
 
         if sock:
             self._sock = sock
         else:
             if dualstack is None:
-                dualstack = self._get_socket_family() == socket.AF_INET6 and socket.has_dualstack_ipv6()
+                dualstack = utility.get_socket_family(self.addr) == socket.AF_INET6 and socket.has_dualstack_ipv6()
             if reuse_port is None:
                 reuse_port = hasattr(socket, 'SO_REUSEPORT')
-            self._sock = socket.create_server(server_addr, family = self._get_socket_family(), backlog = max_listen,
-                                              reuse_port = reuse_port, dualstack_ipv6 = dualstack)
+            self._sock = socket.create_server(
+                self.addr, family = utility.get_socket_family(self.addr),
+                backlog = max_listen, reuse_port = reuse_port, dualstack_ipv6 = dualstack)
             self._sock.settimeout(timeout)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, int(reuse_addr))
 
@@ -134,155 +55,61 @@ class Server:
             ssl_context.load_cert_chain(ssl_cert)
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
 
-    def _get_socket_family(self):
-        if self.addr[0] == '':
-            return socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET
-        addr = ipaddress.ip_address(self.addr[0])
-        return socket.AF_INET if isinstance(addr, ipaddress.IPv4Address) else socket.AF_INET6
-
-    def _check_process(self):
-        """Check whether the server is started as a child process"""
-        tester = socket.socket(self._get_socket_family())
-        try:
-            tester.bind(self.addr)
-        except OSError:
-            tester.close()
-            if issubclass(self.worker_type, multiprocessing.process.BaseProcess):
-                logging.info(f'The server is seemed to be started as a child process. Ignoring all operations...')
-                return True
-            else:
-                logging.error(f'The target address {self.addr} is unavailable')
-        tester.close()
-        return False
-
-    def _create_worker(self):
-        name = f'Worker[{self._worker_index}]'
-        worker = self.worker_type(target = run_worker, name = name, daemon = True,
-                                  kwargs = {'name': name, 'root_node': self.root_node, 'req_queue': self.queue,
-                                            'conn_pool': self.connection_pool})
-        self._worker_index += 1
-        return worker
+        self.backend = self.backend_cls(sock = self._sock, root_node = self.root_node, conn_pool = self.connection_pool,
+                                        max_worker = max_worker)
 
     def run(self, block: bool = True):
         """
         start the server\n
         :param block: if it is True, this method will be blocked until the server shutdown or critical errors occoured
         """
-        if self._is_child:
-            logging.warning('The server is seemed to be started as a child process. The server will not run')
-            return
-        self.is_running = True
-        logging.info('Creating request processors...')
-        self.worker_pool = set(self._create_worker() for _ in range(self.max_worker))
-        for p in self.worker_pool:
-            p.start()
-
         logging.info(f'Listening request on {self.addr}')
-        self.listener = threading.Thread(target = self.accept_conn, daemon = True)
-        self.listener.start()
-        self.receiver = threading.Thread(target = self.recv_request, daemon = True)
-        self.receiver.start()
+        self.runner = threading.Thread(target = self.backend.run, daemon = True)
+        self.runner.start()
         print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
 
         if block:
-            while self.listener.is_alive():
+            while self.runner.is_alive():
                 try:
                     time.sleep(1)
                 except KeyboardInterrupt:
                     self.terminate()
                     return
 
-    def accept_conn(self):
-        """Accept TCP requests from listening ports"""
-        while self.is_running:
-            try:
-                connection, address = self._sock.accept()
-                logging.debug(f'<-{utility.format_socket(connection)}')
-            except socket.timeout:
-                continue
-            except OSError:
-                return  # Server has shut down
-            self.connection_pool.add(connection, address)
-        logging.info('Request listening stopped.')  # This should not appear in the terminal
-
-    def recv_request(self):
-        while self.is_running:
-            try:
-                conn, addr, readed = self.connection_pool.get()
-            except (ConnectionResetError, ConnectionAbortedError):
-                continue
-            self.handle_request(conn, addr, readed)
-
-    def handle_request(self, connection, address, readed: bytes = b''):
-        """
-        Construct an HTTP request object and put it into the request queue\n
-        :param readed: bytes that already readed from connection
-        :param connection: a socket object which is connected to HTTP Client
-        :param address: address of client socket
-        """
-        try:
-            content = readed + utility.recv_request_head(connection)
-            request = Request(addr = address, **utility.parse_req(content), conn = connection)
-            self.queue.put(request)
-            logging.debug(f'{request} <- {utility.format_socket(request.conn)}')
-        except ValueError:
-            traceback.print_exc()
-            try:
-                connection.sendall(Response(code = 400).generate())
-            except (ConnectionAbortedError, ConnectionResetError):
-                pass
-        except (socket.timeout, ConnectionResetError):
-            return
-
     def interrupt(self, timeout: float = 30):
         """
         Stop the server temporarily. Call run() to start the server again.\n
         :param timeout: max time for waiting single active session
         """
-        if self.is_running:
-            self._worker_index = 1
-            logging.info(f'Pausing {self}')
-            self.is_running = False
-            for t in self.worker_pool:
-                logging.info(f'Waiting for active session {t.name}...')
-                t.join(timeout)
-            # self._sock.settimeout(0)
-        else:
-            logging.warning('The server has already stopped, pausing it will not take any effects.')
+        if not self.is_running:
+            logging.warning('The server has already stopped, interrupting it will not take any effects.')
             return
-        if self.listener:
-            logging.info('Waiting for connection listener...')
-            self.listener.join(timeout)
-        logging.info(f'{self} paused successfully.')
-        return
+
+        logging.info(f'Interrupting {self}')
+        self.backend.interrupt()
+        if self.runner.is_alive():
+            logging.info('Waiting for backend...')
+            self.runner.join(timeout)
+        logging.info(f'{self} interrupted successfully.')
 
     def terminate(self):
         """
         Stop the server permanently. After running this method, the server cannot start again.
         """
-
-        def _terminate(worker: WorkerType):
-            worker.join(0)
-            if self.worker_type == multiprocessing.Process:
-                worker.close()
-
-        if self.is_running:
-            logging.info(f'Terminating {self}')
-            self.is_running = False
-            for t in self.worker_pool:
-                logging.info(f'Terminating {t.name}...')
-                _terminate(t)
-            self._sock.close()
-        else:
+        if not self.is_running:
             logging.warning('The server has already stopped.')
             return
-        if self.listener.is_alive():
-            logging.info('Terminating connection listener...')
-            _terminate(self.listener)
-        if self.receiver.is_alive():
-            logging.info('Terminating request receiver...')
-            _terminate(self.receiver)
+
+        logging.info(f'Terminating {self}')
+        self.backend.terminate()
+        if self.runner.is_alive():
+            logging.info('Terminating backend...')
+            self.runner.join(1)  # leave 1 sec for backend to complete termination
         logging.info(f'{self} closed successfully.')
+
+    @property
+    def is_running(self):
+        return self.backend.is_running
 
     def __enter__(self):
         self.run(block = False)
