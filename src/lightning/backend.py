@@ -140,6 +140,7 @@ class BaseBackend(abc.ABC):
             if buf == b'':
                 logging.debug(f'Remove inactive conn:{utility.format_socket(sock)}')
                 self.conn_pool.remove(sock)  # remove inactive connections
+                sock.close()
             else:
                 logging.debug(f'Get active conn:{utility.format_socket(sock)}')
                 return sock, buf
