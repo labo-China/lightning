@@ -1,4 +1,5 @@
 import socket
+import ipaddress
 from urllib.parse import unquote
 from typing import Literal
 
@@ -47,7 +48,14 @@ def format_header(header: str) -> str:
 
 
 def format_socket(conn: socket.socket):
-    return f'{conn.getpeername()}[{conn.fileno()}]' if not getattr(conn, '_closed') else '[closed]'
+    try:
+        conn.getsockname()
+    except OSError:  # socket is closed
+        return '[CLOSED]'
+    try:
+        return f'{conn.getpeername()}[{conn.fileno()}]'
+    except OSError:  # server socket
+        return f'{conn.getsockname()}[{conn.fileno()}][SERVER]'
 
 
 def recv_request_head(conn: socket.socket, readed: bytes = b'') -> bytes:
@@ -100,6 +108,13 @@ def parse_req(content: bytes) -> dict:
 
     return {'method': method, 'url': path, 'keyword': keyword,
             'arg': arg, 'version': ver, 'header': header, 'query': '?' + param if param else ''}
+
+
+def get_socket_family(address):
+    if address[0] == '':
+        return socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET
+    addr = ipaddress.ip_address(address[0])
+    return socket.AF_INET if isinstance(addr, ipaddress.IPv4Address) else socket.AF_INET6
 
 
 HTTP_CODE = {
@@ -162,4 +177,5 @@ HTTP_CODE = {
     600: "Unparseable Response Headers"
 }
 Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS']
-__all__ = ['recv_request_head', 'recv_all', 'parse_req', 'format_socket', 'HTTP_CODE', 'Method', 'CaseInsensitiveDict']
+__all__ = ['recv_request_head', 'recv_all', 'parse_req', 'format_socket', 'get_socket_family',
+           'HTTP_CODE', 'Method', 'CaseInsensitiveDict']
