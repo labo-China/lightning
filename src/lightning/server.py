@@ -31,7 +31,6 @@ class Server:
         :param sock: a given socket
         """
         self.runner = None
-        self.addr = sock.getsockname() if sock else server_addr
         self.backend_cls = backend.get_backend_class(multi_status)
         self.connection_pool = backend.ConnectionPool(timeout = keep_alive_timeout)
         self.root_node = Node(desc = 'root_node', **kwargs)
@@ -41,14 +40,16 @@ class Server:
             self._sock = sock
         else:
             if dualstack is None:
-                dualstack = utility.get_socket_family(self.addr) == socket.AF_INET6 and socket.has_dualstack_ipv6()
+                dualstack = utility.get_socket_family(server_addr) == socket.AF_INET6 and socket.has_dualstack_ipv6()
             if reuse_port is None:
                 reuse_port = hasattr(socket, 'SO_REUSEPORT')
             self._sock = socket.create_server(
-                self.addr, family = utility.get_socket_family(self.addr),
+                server_addr, family = utility.get_socket_family(server_addr),
                 backlog = max_listen, reuse_port = reuse_port, dualstack_ipv6 = dualstack)
             self._sock.settimeout(timeout)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, int(reuse_addr))
+        # not to use server_addr directly since server_addr could contain irregular address or port number
+        self.addr = self._sock.getsockname()
 
         if ssl_cert:
             ssl_context = SSLContext()

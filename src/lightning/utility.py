@@ -113,7 +113,10 @@ def parse_req(content: bytes) -> dict:
 def get_socket_family(address):
     if address[0] == '':
         return socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET
-    addr = ipaddress.ip_address(address[0])
+    try:
+        addr = ipaddress.ip_address(address[0])
+    except ValueError:  # address might be a domain name, return the better one
+        return socket.AF_INET6 if socket.has_ipv6 else socket.AF_INET
     return socket.AF_INET if isinstance(addr, ipaddress.IPv4Address) else socket.AF_INET6
 
 
