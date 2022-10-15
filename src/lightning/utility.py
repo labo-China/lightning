@@ -48,9 +48,7 @@ def format_header(header: str) -> str:
 
 
 def format_socket(conn: socket.socket):
-    try:
-        conn.getsockname()
-    except OSError:  # socket is closed
+    if getattr(conn, '_closed'):
         return '[CLOSED]'
     try:
         return f'{conn.getpeername()}[{conn.fileno()}]'
