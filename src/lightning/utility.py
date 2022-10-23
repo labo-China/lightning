@@ -177,6 +177,6 @@ HTTP_CODE = {
     510: "Not Extended",
     600: "Unparseable Response Headers"
 }
-Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS']
+Method = Literal['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'CONNECT', 'TRACE', 'OPTIONS', 'PATCH']
 __all__ = ['recv_request_head', 'recv_all', 'parse_req', 'format_socket', 'get_socket_family',
            'HTTP_CODE', 'Method', 'CaseInsensitiveDict']
