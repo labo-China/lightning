@@ -59,15 +59,17 @@ class Server:
         self.backend = self.backend_cls(sock = self._sock, root_node = self.root_node, conn_pool = self.connection_pool,
                                         max_worker = max_worker)
 
-    def run(self, block: bool = True):
+    def run(self, block: bool = True, quiet: bool = False):
         """
         start the server\n
         :param block: if it is True, this method will be blocked until the server shutdown or critical errors occoured
+        :param quiet: whether server prints greeting message
         """
         logging.info(f'Listening request on {self.addr}')
         self.runner = threading.Thread(target = self.backend.run, daemon = True)
         self.runner.start()
-        print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
+        if not quiet:
+            print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
 
         if block:
             while self.runner.is_alive():
