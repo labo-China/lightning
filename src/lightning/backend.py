@@ -153,10 +153,18 @@ class BaseBackend(abc.ABC):
             return
         return self.build_request(*result)
 
-    def _process_request(self, request: Request):
+    def process_request(self, request: Request):
         """Process a request"""
-        resp = self.root_node.process(request)
+        def get_resp():
+            try:
+                return self.root_node.process(request)
+            except Exception:
+                logging.warning('An Exception is detected. Sending fallback response.',
+                                exc_info = True)
+                fallback = self.root_node.select_target(request)[0].fallback
+                return fallback(request)
 
+        resp = get_resp()
         if getattr(request.conn, '_closed'):
             if resp is not None:
                 logging.warning(f'Connection from {request.addr} was closed before sending response')
@@ -167,7 +175,7 @@ class BaseBackend(abc.ABC):
             logging.warning(f'Unused data found in {utility.format_socket(request.conn)}: {rest}')
 
         if resp is None:  # assume that response is already sent
-            logging.info(f'{root_node} -> ... -> {utility.format_socket(request.conn)}')
+            logging.info(f'{self.root_node} -> ... -> {utility.format_socket(request.conn)}')
             self.conn_pool.add(request.conn)
             return
 
@@ -186,20 +194,10 @@ class BaseBackend(abc.ABC):
         request.conn.sendall(resp_data)
         logging.info(f'{self.root_node} -> {resp} -> {utility.format_socket(request.conn)}')
 
-        if close_conn:
+        if close_conn or getattr(request.conn, '_closed'):
             request.conn.close()
         else:
             self.conn_pool.add(request.conn)
-
-    def process_request(self, request: Request):
-        """Process a request and handle exceptions with fallback"""
-        try:
-            self._process_request(request)
-        except Exception:
-            logging.warning('It seems that the process has not completed yet. Sending fallback response.',
-                            exc_info = True)
-            fallback = self.root_node.select_target(request)[0].fallback
-            request.conn.sendall(fallback(request).generate())
 
     @staticmethod
     def build_request(conn: socket.socket, readed: bytes = None):
