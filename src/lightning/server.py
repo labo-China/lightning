@@ -10,11 +10,24 @@ from . import utility, backend
 from .structs import Node
 
 
+def create_server_conn(server_addr: tuple, max_listen, reuse_port, reuse_addr, dualstack, timeout):
+    if dualstack is None:
+        dualstack = utility.get_socket_family(server_addr) == socket.AF_INET6 and socket.has_dualstack_ipv6()
+    if reuse_port is None:
+        reuse_port = hasattr(socket, 'SO_REUSEPORT')
+    conn = socket.create_server(
+        server_addr, family = utility.get_socket_family(server_addr),
+        backlog = max_listen, reuse_port = reuse_port, dualstack_ipv6 = dualstack)
+    conn.settimeout(timeout)
+    conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, reuse_addr)
+    return conn
+
+
 class Server:
     """The HTTP server class"""
 
     def __init__(self, server_addr: tuple[str, int] = ('', 80), *, max_listen: int = 0, timeout: int = None,
-                 ssl_cert: str = None, max_worker: int = None, multi_status: str = 'thread', reuse_port: bool = None,
+                 ssl_cert: str = None, max_worker: int = None, backend_flag: str = 'thread', reuse_port: bool = None,
                  reuse_addr: bool = True, dualstack: bool = None, keep_alive_timeout: int = 75,
                  sock: socket.socket = None, **kwargs):
         """
@@ -23,7 +36,7 @@ class Server:
         :param timeout: timeout for server socket
         :param ssl_cert: SSL certificate content
         :param max_worker: max size of worker queue
-        :param multi_status: specify if this server use single processing or mulit-thread processing
+        :param backend_flag: specify if this server use single processing or mulit-thread processing
         :param keep_alive_timeout: timeout for Keep-Alive in HTTP/1.1. Set it to 0 to disable it.
         :param reuse_port: whether server socket reuse port (set SO_REUSEPORT to 1)
         :param reuse_addr: whether server socket reuse address (set SO_REUSEADDR to 1)
@@ -31,23 +44,12 @@ class Server:
         :param sock: a given socket
         """
         self.runner = None
-        self.backend_cls = backend.get_backend_class(multi_status)
+        self.backend_cls = backend.get_backend_class(backend_flag)
         self.connection_pool = backend.ConnectionPool(timeout = keep_alive_timeout)
         self.root_node = Node(desc = 'root_node', **kwargs)
         self.bind = self.root_node.bind  # create an alias
 
-        if sock:
-            self._sock = sock
-        else:
-            if dualstack is None:
-                dualstack = utility.get_socket_family(server_addr) == socket.AF_INET6 and socket.has_dualstack_ipv6()
-            if reuse_port is None:
-                reuse_port = hasattr(socket, 'SO_REUSEPORT')
-            self._sock = socket.create_server(
-                server_addr, family = utility.get_socket_family(server_addr),
-                backlog = max_listen, reuse_port = reuse_port, dualstack_ipv6 = dualstack)
-            self._sock.settimeout(timeout)
-            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, int(reuse_addr))
+        self._sock = sock or create_server_conn(server_addr, max_listen, reuse_port, reuse_addr, dualstack, timeout)
         # not to use server_addr directly since server_addr could contain irregular address or port number
         self.addr = self._sock.getsockname()
 
@@ -71,13 +73,14 @@ class Server:
         if not quiet:
             print(f'Server running on {self._sock.getsockname()}. Press Ctrl+C to quit.')
 
-        if block:
-            while self.runner.is_alive():
-                try:
-                    time.sleep(1)
-                except KeyboardInterrupt:
-                    self.terminate()
-                    return
+        if not block:
+            return
+        while self.runner.is_alive():
+            try:
+                time.sleep(1)
+            except KeyboardInterrupt:
+                self.terminate()
+                return
 
     def interrupt(self, timeout: float = 30):
         """
