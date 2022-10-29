@@ -38,6 +38,9 @@ class ConnectionPool:
         if len(self.table) > self.clean_threshold:
             logging.debug(f'connections count ({len(self.table)}) has reached threshold. performing cleaning')
             self.clean()
+        if getattr(conn, '_closed'):
+            logging.warning(f'adding closed socket')
+            return
         self.active_conn.add(conn)
         self.table[conn] = time.time() + self.timeout if not forever else None
         logging.debug(f'{utility.format_socket(conn)} has been added to connection pool')
@@ -70,6 +73,8 @@ class ConnectionPool:
             if not self.active_conn:
                 time.sleep(0.05)
                 continue
+            for c in list(conn for conn in self.active_conn if getattr(conn, '_closed')):
+                self.active_conn.remove(c)
             for rl in select.select(self.active_conn, [], [], 5):
                 for r in rl:
                     if self.closed:
