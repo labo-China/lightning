@@ -266,15 +266,15 @@ class Node(Interface):
         """
         :param interface_map: initral mapping for interfaces
         :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
-        :param default: the final interface when no interfaces were matched
+        :param default: the default root interface
         """
         super().__init__(generic = self._process, *args, **kwargs)
         self.map_static: dict[str, Interface] = interface_map or {}
         self.map_callback = interface_callback
-        self.default = default
+        self.bind('/', default)
         self.last_call: str = ''
 
-    def select_target(self, request: Request) -> tuple[Interface, Request]:
+    def select_target(self, request: Request) -> tuple[Responsive, Request]:
         """Select the matched interface then return it with adjusted request"""
         interface_map = self.get_map()
         req_path = pathlib.PurePosixPath(request.path)
@@ -293,7 +293,7 @@ class Node(Interface):
                     new_req.path = path
                 return target, new_req
         else:
-            return Interface.create_from(self.default), request
+            raise ValueError(f'Path "{req_path}" is not a valid path')
 
     def _process(self, request: Request) -> Sendable:
         target, request = self.select_target(request)
@@ -306,7 +306,7 @@ class Node(Interface):
             return self.map_static
         return dict({**self.map_static, **self.map_callback()})
 
-    def bind(self, pattern: str, interface_or_method: Union[Interface, list[Method]] = None, *args, **kwargs):
+    def bind(self, pattern: str, interface_or_method: Union[Responsive, list[Method]] = None, *args, **kwargs):
         r"""
         Bind an interface or function into this node.
         :param pattern: the url prefix to match requests.
