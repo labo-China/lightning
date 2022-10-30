@@ -6,7 +6,7 @@ from .interfaces import StorageView, Echo
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--host', default = '0.0.0.0', help = 'host IP address')
-parser.add_argument('--port', default = 80, help = 'port number to bind server', type = int)
+parser.add_argument('--port', default = 0, help = 'port number to bind server', type = int)
 parser.add_argument('--path', default = '.', help = 'directory to share')
 parser.add_argument('--depth', default = 0, help = 'maxmium depth of direcrtories', type = int)
 parser.add_argument('--strict', action = 'store_true', help = 'disable view pages and disallow exceeded symlinks')
@@ -33,5 +33,6 @@ if not args.quiet:
     # assume that server will run before the browser actually starts to render the page
     # so open browser first is totally fine here because browsers usually have longer startup time
     host = '127.0.0.1' if args.host == '0.0.0.0' else args.host
-    webbrowser.open(f'http://{host}:{args.port}/')
+    port = server.addr[1] if args.port == 0 else args.port
+    webbrowser.open(f'http://{host}:{port}/')
 server.run()
