@@ -85,7 +85,11 @@ def recv_all(conn: socket.socket, buffer: int = 1024, blocking: bool = False) ->
 
 def parse_req(content: bytes) -> dict:
     """Parse a request data into a dict object in order to construct a Request object"""
-    line, *head = content.decode().split('\r\n')
+    try:
+        content_seq = content.decode('utf-8')
+    except UnicodeDecodeError:
+        content_seq = content.decode('gbk')
+    line, *head = content_seq.split('\r\n')
     method, uv = line.split(' ', 1)
     url, ver = uv.rsplit(' ', 1)
 
