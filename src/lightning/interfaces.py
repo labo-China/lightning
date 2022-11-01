@@ -15,15 +15,16 @@ class File(Interface):
     """The file interface"""
 
     def __init__(self, path: str, filename: str = None, mime: str = None,
-                 range_support: bool = True, updateble: bool = False, force_download: bool = False):
+                 range_support: bool = True, force_download: bool = False):
+        super().__init__(self.download, desc = path)
         self.path = path
         self.range = range_support
-        self.update = updateble
+        # self.update = updateble
         self.filename = filename or basename(path)
         self.filesize = getsize(self.path)
-        self.mime = mime or guess_type(self.filename)[0] or 'application/octet-stream'
+        self.mime = mime or self.get_mime()
+        logging.debug(f'Using MIME "{self.mime}" for {self}')
         self.force_download = force_download
-        super().__init__(self.download, desc = path)
 
     def download(self, request: Request):
         def sendfile(conn, *args):
@@ -31,8 +32,6 @@ class File(Interface):
                 conn.sendfile(*args)
             except (ConnectionAbortedError, ConnectionResetError):  # the error is raised by certain downloaders
                 pass
-            finally:
-                request.conn.close()  # block the worker to stop sending response
 
         try:
             file = open(self.path, 'rb')
@@ -55,15 +54,24 @@ class File(Interface):
                 'Accept-Ranges': 'bytes',
                 'Content-Range': f'bytes {start}-{end}/{self.filesize}'}).generate())
             sendfile(request.conn, file, start, left)
-            return Response(206)
         else:
-            mime = guess_type(self.filename)[0] or 'application/octet-stream'
             header = {'Content-Disposition': 'attachment;filename=' + self.filename} if self.force_download else {}
             request.conn.sendall(Response(header = {'Content-Length': str(self.filesize),
-                                                    'Content-Type': mime,
+                                                    'Content-Type': self.mime,
                                                     'Accept-Ranges': 'bytes'} | header).generate())
             sendfile(request.conn, file)
-            return Response(200)
+
+    def get_mime(self) -> str:
+        """Get a proper MIME for a file. It will check the filename, Then for the content"""
+        builtin_mime = guess_type(self.filename, strict = False)
+        if builtin_mime[0]:
+            return builtin_mime[0]
+
+        with open(self.path, 'rb') as fd:
+            if b'\x00' in fd.read(1024):  # Is it a binary file?
+                return 'application/octet-stream'
+            else:
+                return 'text/plain'
 
 
 class StorageView(Interface):
