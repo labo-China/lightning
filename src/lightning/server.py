@@ -127,7 +127,7 @@ class Server:
         return True
 
     def __del__(self):
-        if self.is_running:
+        if hasattr(self, 'backend') and self.is_running:  # prevent crash when it is called as init doesn`t finish
             self.terminate()
 
     def __repr__(self) -> str:
