@@ -320,8 +320,9 @@ class Node(Interface):
             pattern = pattern.removesuffix('/')
         if isinstance(interface_or_method, Interface) or hasattr(interface_or_method, '__call__'):
             # called as a normal function
+            if self.map_static:  # avoid log event for binding default interface
+                logging.info(f'{interface_or_method} is bound on {pattern}')
             self.map_static[pattern] = interface_or_method
-            logging.info(f'{interface_or_method} is bound on {pattern}')
             return
 
         def decorator(func):  # called as a decorator
