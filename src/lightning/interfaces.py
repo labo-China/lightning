@@ -87,7 +87,7 @@ class StorageView(Interface):
         self.enable_view = enable_view
         self.allow_exceed_links = allow_exceeded_links
         self.rules = rules
-        super().__init__(self.main)
+        super().__init__(self.main, desc = root)
 
     def main(self, request: Request):
         # return 403-Forbidden if depth is given and request is deeper than it
