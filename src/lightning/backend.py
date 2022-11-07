@@ -173,6 +173,8 @@ class BaseBackend(abc.ABC):
         if getattr(request.conn, '_closed'):
             if resp is not None:
                 logging.warning(f'Connection from {request.addr} was closed before sending response')
+            else:
+                logging.info(f'{self.root_node} -> ... -> {utility.format_socket(request.conn)}')
             return
 
         rest = utility.recv_all(request.conn)  # receive all unused data to make keep-alive working

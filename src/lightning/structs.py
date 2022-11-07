@@ -202,6 +202,7 @@ class Interface:
     def process(self, request: Request) -> Response:
         """
         Let target function process the request and return the result\n
+        *Note*: You **MUST NOT** override this method\n
         :param request: the request to process
         """
         if self.strict and (request.path != ''):
