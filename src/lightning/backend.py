@@ -88,7 +88,7 @@ class ConnectionPool:
     def close(self):
         """Remove and close all connections in the pool"""
         self.closed = True
-        for conn in self.table.keys():
+        for conn in set(self.table.keys()):
             conn.close()
         self.active_conn.clear()
         self.table.clear()
