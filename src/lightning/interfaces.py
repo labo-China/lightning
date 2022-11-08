@@ -16,7 +16,7 @@ class File(Interface):
 
     def __init__(self, path: str, filename: str = None, mime: str = None,
                  range_support: bool = True, force_download: bool = False):
-        super().__init__(self.download, desc = path)
+        super().__init__(desc = path)
         self.path = path
         self.range = range_support
         # self.update = updateble
@@ -26,7 +26,7 @@ class File(Interface):
         logging.debug(f'Using MIME "{self.mime}" for {self}')
         self.force_download = force_download
 
-    def download(self, request: Request):
+    def get(self, request: Request):
         def sendfile(conn, *args):
             try:
                 conn.sendfile(*args)
@@ -87,9 +87,9 @@ class StorageView(Interface):
         self.enable_view = enable_view
         self.allow_exceed_links = allow_exceeded_links
         self.rules = rules
-        super().__init__(self.main, desc = root)
+        super().__init__(desc = root)
 
-    def main(self, request: Request):
+    def generic(self, request: Request):
         # return 403-Forbidden if depth is given and request is deeper than it
         if self.depth:
             p = pathlib.Path(request.path)
@@ -110,7 +110,7 @@ class StorageView(Interface):
 
         if path.is_file():
             file = File(str(path))
-            return file.download(request)
+            return file(request)
         elif path.is_dir():
             if not request.url.endswith('/'):
                 return Response(301, header = {'Location': request.url + '/'})
@@ -169,9 +169,9 @@ class WSGIInterface(Interface):
         self.response: Response = Response()
         self.content_iter: Iterable = ()
         kwargs.update({'pre': None, 'post': None})
-        super().__init__(self.call, *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
-    def call(self, request: Request) -> Response:
+    def generic(self, request: Request) -> Response:
         resp = self.app(self.get_environ(request), self.start_response)
         self.content_iter = (resp or []).__iter__()
         data = self.response.generate()

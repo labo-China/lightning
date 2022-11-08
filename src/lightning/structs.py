@@ -328,7 +328,7 @@ class Node(Interface):
         :param interface_callback: the function to call whenever getting mapping in order to modify mapping dynamically
         :param default: the default root interface
         """
-        super().__init__(generic = self._process, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.map_static: dict[str, Interface] = interface_map or {}
         self.map_callback = interface_callback
         self.bind('/', default)
@@ -355,7 +355,7 @@ class Node(Interface):
         else:
             raise ValueError(f'Path "{req_path}" is not a valid path')
 
-    def _process(self, request: Request) -> Sendable:
+    def generic(self, request: Request) -> Sendable:
         target, request = self.select_target(request)
         self.last_call = repr(target)
         return target(request)
