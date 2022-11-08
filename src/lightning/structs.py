@@ -135,6 +135,11 @@ Sendable = Union[Response, str, bytes, None]
 Responsive = Callable[[Request], Sendable]
 
 
+def add_sign(_):
+    """Do nothing."""
+    return
+
+
 class Interface:
     """The HTTP server handler. It produces Responses to send."""
 
@@ -184,15 +189,18 @@ class Interface:
             logging.warning(f'Request method {method} is invaild. Sending 400-Response instead.')
             return Response(400)  # incorrect request method
 
-        if hasattr(self, method.lower()):
+        if self.has_method(method):
             return getattr(self, method.lower())
         elif method in self.default_methods:
             return self.default_methods[method]
         else:
             return self.generic
 
+    def has_method(self, method: str):
+        return getattr(self, method.lower(), None) is not None
+
     def find_methods(self):
-        return tuple(m for m in Method.__args__ if hasattr(self, m.lower()))
+        return tuple(m for m in Method.__args__ if self.has_method(m))
 
     def fallback(self, request: Request) -> Response:
         return Response.create_from(self._fallback(request))
@@ -229,7 +237,7 @@ class Interface:
 
     def head_(self, request: Request) -> Response:
         """Default "HEAD" method implementation"""
-        if not hasattr(self, 'get') and self.generic == Response(405):
+        if not self.has_method(request.method) and self.generic == Response(405):
             return Response(405)
         request.method = 'GET'
         resp = Response.create_from(self.process(request))
@@ -237,15 +245,45 @@ class Interface:
         return resp
 
     # register signatures for potential method definitions
-    get: Optional[Responsive]
-    post: Optional[Responsive]
-    put: Optional[Responsive]
-    delete: Optional[Responsive]
-    head: Optional[Responsive]
-    connect: Optional[Responsive]
-    trace: Optional[Responsive]
-    options: Optional[Responsive]
-    patch: Optional[Responsive]
+    @add_sign
+    def get(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def post(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def put(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def delete(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def head(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def connect(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def trace(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def options(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def patch(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def generic(self, request: Request) -> Sendable:
+        ...
 
     def __call__(self, *args, **kwargs):
         return self.process(*args, **kwargs)
