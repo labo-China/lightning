@@ -227,7 +227,8 @@ class Interface:
         try:
             resp = Response.create_from(handler(request))
         except Exception:
-            logging.warning(f'Exception detected during processing {request} with {self}. Using fallback.')
+            logging.warning(f'Exception detected during processing {request} with {self}. '
+                            f'Using fallback.', exc_info = True)
             resp = Response.create_from(self.fallback(request))
         for pst in self.fpost:
             resp = Response.create_from(pst(request, resp))
