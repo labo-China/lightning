@@ -135,13 +135,18 @@ Sendable = Union[Response, str, bytes, None]
 Responsive = Callable[[Request], Sendable]
 
 
+def add_sign(_):
+    """Do nothing."""
+    return
+
+
 class Interface:
     """The HTTP server handler. It produces Responses to send."""
 
     def __init__(self, get_or_method: Union[dict[Method, Responsive], Responsive] = None,
                  generic: Responsive = Response(405), fallback: Responsive = Response(500),
-                 pre: list[Callable[[Request], Union[Request, Sendable]]] = None,
-                 post: list[Callable[[Request, Response], Sendable]] = None,
+                 fpre: list[Callable[[Request], Union[Request, Sendable]]] = None,
+                 fpost: list[Callable[[Request, Response], Sendable]] = None,
                  desc: str = None, strict: bool = False):
         r"""
         :param get_or_method: a method-responsive-style dict. If a Responsive object is given, it will be GET handler
@@ -150,23 +155,20 @@ class Interface:
             it`s return value will be the final response
         :param strict: whether the interface will catch extra path in interfaces and return a 404 response
         :param desc: description about the interface. It will show instead of default message when calling __repr__
-        :param pre: things to do before processing request, it will be sent as final response
+        :param fpre: things to do before processing request, it will be sent as final response
             if a Response object is returned
-        :param post: things to do after the function processed request
+        :param fpost: things to do after the function processed request
         """
-        if get_or_method is None:
-            self.methods = {}
-        elif isinstance(get_or_method, dict):
-            self.methods = get_or_method
-        else:
-            # assume it is a Responsive object
-            self.methods = {'GET': get_or_method}
+        if isinstance(get_or_method, dict):
+            for m in get_or_method:
+                setattr(self, m.lower(), get_or_method[m])
+        elif isinstance(get_or_method, Callable):
+            setattr(self, 'get', get_or_method)
         self.default_methods = {'HEAD': self.head_, 'OPTIONS': self.options_}
-        self.methods: dict[Method, Responsive] = self.methods
         self.generic = generic
         self._fallback = fallback
-        self.pre = pre or []
-        self.post = post or []
+        self.fpre = fpre or []
+        self.fpost = fpost or []
         self.desc = desc
         self.strict = strict
 
@@ -180,21 +182,25 @@ class Interface:
         else:
             raise ValueError(f'{obj} is not responsive nor callable')
 
-    def _select_method(self, request: Request) -> Sendable:
+    def _select_method(self, request: Request) -> Responsive:
         """Return a response which is produced by specified method in request"""
         method = request.method
         if method not in Method.__args__:
             logging.warning(f'Request method {method} is invaild. Sending 400-Response instead.')
             return Response(400)  # incorrect request method
 
-        handler = self.methods.get(method)
-        if handler is not None:
-            return handler(request)
+        if self.has_method(method):
+            return getattr(self, method.lower())
+        elif method in self.default_methods:
+            return self.default_methods[method]
         else:
-            if method in self.default_methods:
-                return self.default_methods[method](request)
-            else:
-                return self.generic(request)
+            return self.generic
+
+    def has_method(self, method: str):
+        return getattr(self, method.lower(), None) is not None
+
+    def find_methods(self):
+        return tuple(m for m in Method.__args__ if self.has_method(m))
 
     def fallback(self, request: Request) -> Response:
         return Response.create_from(self._fallback(request))
@@ -209,33 +215,75 @@ class Interface:
             logging.warning(f'Request path {request.path} is out of root directory. Sending 404-Response instead')
             return Response(404)
 
-        for pre in self.pre:
+        for pre in self.fpre:
             res = pre(request)
             if isinstance(res, Request):
                 request = res
             elif isinstance(res, Sendable):
                 return Response.create_from(res)
 
-        resp = Response.create_from(self._select_method(request))
-        for pst in self.post:
+        handler = self._select_method(request)
+        resp = Response.create_from(handler(request))
+        for pst in self.fpost:
             resp = Response.create_from(pst(request, resp))
         return resp
 
     def options_(self, request: Request) -> Response:
         """Default "OPTIONS" method implementation"""
-        resp = Response(header = {'Allow': ','.join(self.methods.keys())})
+        resp = Response(header = {'Allow': ','.join(self.find_methods())})
         if request.header.get('Origin'):
             resp.header.update({'Access-Control-Allow-Origin': request.header['Origin']})
         return resp
 
     def head_(self, request: Request) -> Response:
         """Default "HEAD" method implementation"""
-        if 'GET' not in self.methods and self.generic == Response(405):
+        if not self.has_method(request.method) and self.generic == Response(405):
             return Response(405)
         request.method = 'GET'
         resp = Response.create_from(self.process(request))
         resp.content = b''
         return resp
+
+    # register signatures for potential method definitions
+    @add_sign
+    def get(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def post(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def put(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def delete(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def head(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def connect(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def trace(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def options(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def patch(self, request: Request) -> Sendable:
+        ...
+
+    @add_sign
+    def generic(self, request: Request) -> Sendable:
+        ...
 
     def __call__(self, *args, **kwargs):
         return self.process(*args, **kwargs)
@@ -249,12 +297,12 @@ class Interface:
         template = self.__class__.__name__ + '[{}]'
         if self.desc:
             return template.format(self.desc)
-        if not self.methods:
+        if not self.find_methods():
             return template.format(name(self.generic))
 
         method_map = []
-        for method, func in self.methods.items():
-            method_map.append(method.upper() + ':' + name(func))
+        for method in self.find_methods():
+            method_map.append(method.upper() + ':' + name(getattr(self, method.lower())))
         return template.format('|'.join(method_map))
 
 
