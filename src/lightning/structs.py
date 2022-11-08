@@ -140,8 +140,8 @@ class Interface:
 
     def __init__(self, get_or_method: Union[dict[Method, Responsive], Responsive] = None,
                  generic: Responsive = Response(405), fallback: Responsive = Response(500),
-                 pre: list[Callable[[Request], Union[Request, Sendable]]] = None,
-                 post: list[Callable[[Request, Response], Sendable]] = None,
+                 fpre: list[Callable[[Request], Union[Request, Sendable]]] = None,
+                 fpost: list[Callable[[Request, Response], Sendable]] = None,
                  desc: str = None, strict: bool = False):
         r"""
         :param get_or_method: a method-responsive-style dict. If a Responsive object is given, it will be GET handler
@@ -150,9 +150,9 @@ class Interface:
             it`s return value will be the final response
         :param strict: whether the interface will catch extra path in interfaces and return a 404 response
         :param desc: description about the interface. It will show instead of default message when calling __repr__
-        :param pre: things to do before processing request, it will be sent as final response
+        :param fpre: things to do before processing request, it will be sent as final response
             if a Response object is returned
-        :param post: things to do after the function processed request
+        :param fpost: things to do after the function processed request
         """
         if get_or_method is None:
             self.methods = {}
@@ -165,8 +165,8 @@ class Interface:
         self.methods: dict[Method, Responsive] = self.methods
         self.generic = generic
         self._fallback = fallback
-        self.pre = pre or []
-        self.post = post or []
+        self.fpre = fpre or []
+        self.fpost = fpost or []
         self.desc = desc
         self.strict = strict
 
@@ -209,7 +209,7 @@ class Interface:
             logging.warning(f'Request path {request.path} is out of root directory. Sending 404-Response instead')
             return Response(404)
 
-        for pre in self.pre:
+        for pre in self.fpre:
             res = pre(request)
             if isinstance(res, Request):
                 request = res
@@ -217,7 +217,7 @@ class Interface:
                 return Response.create_from(res)
 
         resp = Response.create_from(self._select_method(request))
-        for pst in self.post:
+        for pst in self.fpost:
             resp = Response.create_from(pst(request, resp))
         return resp
 
