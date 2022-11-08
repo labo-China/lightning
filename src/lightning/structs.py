@@ -177,7 +177,7 @@ class Interface:
         else:
             raise ValueError(f'{obj} is not responsive nor callable')
 
-    def _select_method(self, request: Request) -> Sendable:
+    def _select_method(self, request: Request) -> Responsive:
         """Return a response which is produced by specified method in request"""
         method = request.method
         if method not in Method.__args__:
@@ -185,11 +185,11 @@ class Interface:
             return Response(400)  # incorrect request method
 
         if hasattr(self, method.lower()):
-            return getattr(self, method.lower())(request)
+            return getattr(self, method.lower())
         elif method in self.default_methods:
-            return self.default_methods[method](request)
+            return self.default_methods[method]
         else:
-            return self.generic(request)
+            return self.generic
 
     def find_methods(self):
         return tuple(m for m in Method.__args__ if hasattr(self, m.lower()))
@@ -214,7 +214,8 @@ class Interface:
             elif isinstance(res, Sendable):
                 return Response.create_from(res)
 
-        resp = Response.create_from(self._select_method(request))
+        handler = self._select_method(request)
+        resp = Response.create_from(handler(request))
         for pst in self.fpost:
             resp = Response.create_from(pst(request, resp))
         return resp
