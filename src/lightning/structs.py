@@ -236,6 +236,17 @@ class Interface:
         resp.content = b''
         return resp
 
+    # register signatures for potential method definitions
+    get: Optional[Responsive]
+    post: Optional[Responsive]
+    put: Optional[Responsive]
+    delete: Optional[Responsive]
+    head: Optional[Responsive]
+    connect: Optional[Responsive]
+    trace: Optional[Responsive]
+    options: Optional[Responsive]
+    patch: Optional[Responsive]
+
     def __call__(self, *args, **kwargs):
         return self.process(*args, **kwargs)
 
