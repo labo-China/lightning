@@ -144,7 +144,7 @@ class Interface:
     """The HTTP server handler. It produces Responses to send."""
 
     def __init__(self, get_or_method: Union[dict[Method, Responsive], Responsive] = None,
-                 generic: Responsive = Response(405), fallback: Responsive = Response(500),
+                 generic: Responsive = None, fallback: Responsive = None,
                  fpre: list[Callable[[Request], Union[Request, Sendable]]] = None,
                  fpost: list[Callable[[Request, Response], Sendable]] = None,
                  desc: str = None, strict: bool = False):
@@ -164,9 +164,13 @@ class Interface:
                 setattr(self, m.lower(), get_or_method[m])
         elif isinstance(get_or_method, Callable):
             setattr(self, 'get', get_or_method)
+
+        if generic is not None:
+            self.generic = generic
+        if fallback is not None:
+            self.fallback = fallback
+
         self.default_methods = {'HEAD': self.head_, 'OPTIONS': self.options_}
-        self.generic = generic
-        self._fallback = fallback
         self.fpre = fpre or []
         self.fpost = fpost or []
         self.desc = desc
@@ -202,9 +206,6 @@ class Interface:
     def find_methods(self):
         return tuple(m for m in Method.__args__ if self.has_method(m))
 
-    def fallback(self, request: Request) -> Response:
-        return Response.create_from(self._fallback(request))
-
     def process(self, request: Request) -> Response:
         """
         Let target function process the request and return the result\n
@@ -223,7 +224,11 @@ class Interface:
                 return Response.create_from(res)
 
         handler = self._select_method(request)
-        resp = Response.create_from(handler(request))
+        try:
+            resp = Response.create_from(handler(request))
+        except Exception:
+            logging.warning(f'Exception detected during processing {request} with {self}. Using fallback.')
+            resp = Response.create_from(self.fallback(request))
         for pst in self.fpost:
             resp = Response.create_from(pst(request, resp))
         return resp
@@ -245,6 +250,7 @@ class Interface:
         return resp
 
     # register signatures for potential method definitions
+    # You may override these functions
     @add_sign
     def get(self, request: Request) -> Sendable:
         ...
@@ -281,9 +287,14 @@ class Interface:
     def patch(self, request: Request) -> Sendable:
         ...
 
-    @add_sign
     def generic(self, request: Request) -> Sendable:
-        ...
+        logging.warning(f'request method {request.method} is not defined in {self}, sending 405-response.')
+        return Response(405)
+
+    @staticmethod
+    def fallback(request: Request) -> Response:
+        logging.warning(f'Sending default fallback response for {request}')
+        return Response(500)
 
     def __call__(self, *args, **kwargs):
         return self.process(*args, **kwargs)

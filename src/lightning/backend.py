@@ -160,16 +160,7 @@ class BaseBackend(abc.ABC):
 
     def process_request(self, request: Request):
         """Process a request"""
-        def get_resp():
-            try:
-                return self.root_node.process(request)
-            except Exception:
-                logging.warning('An Exception is detected. Sending fallback response.',
-                                exc_info = True)
-                fallback = self.root_node.select_target(request)[0].fallback
-                return fallback(request)
-
-        resp = get_resp()
+        resp = self.root_node.process(request)
         if getattr(request.conn, '_closed'):
             if resp is not None:
                 logging.warning(f'Connection from {request.addr} was closed before sending response')

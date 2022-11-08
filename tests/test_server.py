@@ -63,7 +63,9 @@ class TestInterface(Template):
 
         for method in ['POST', 'PUT', 'DELETE', 'PATCH', 'CONNECT']:
             if method != 'GET':
-                resp = requests.request(method, f'http://{self.get_addr()}/test')
+                with self.assertLogs(level = 'WARNING') as log:
+                    resp = requests.request(method, f'http://{self.get_addr()}/test')
+                self.assertIn('is not defined', log.output[0])
                 self.assertEqual(resp.status_code, 405)
 
         with self.assertLogs(level = 'WARNING') as log:
@@ -90,6 +92,4 @@ class TestInterface(Template):
         with self.assertLogs(level = 'WARNING') as log:
             self.perform_test(code = 500, content = b'')
             self.perform_test('/test_fallback')
-        for msg in log.output:
-            self.assertIn('WARNING:root:An Exception is detected. Sending fallback response.',
-                          msg)
+        self.assertIn('Exception detected', log.output[0])
