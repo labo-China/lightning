@@ -154,15 +154,12 @@ class Interface:
             if a Response object is returned
         :param fpost: things to do after the function processed request
         """
-        if get_or_method is None:
-            self.methods = {}
-        elif isinstance(get_or_method, dict):
-            self.methods = get_or_method
-        else:
-            # assume it is a Responsive object
-            self.methods = {'GET': get_or_method}
+        if isinstance(get_or_method, dict):
+            for m in get_or_method:
+                setattr(self, m.lower(), get_or_method[m])
+        elif isinstance(get_or_method, Callable):
+            setattr(self, 'get', get_or_method)
         self.default_methods = {'HEAD': self.head_, 'OPTIONS': self.options_}
-        self.methods: dict[Method, Responsive] = self.methods
         self.generic = generic
         self._fallback = fallback
         self.fpre = fpre or []
@@ -187,14 +184,15 @@ class Interface:
             logging.warning(f'Request method {method} is invaild. Sending 400-Response instead.')
             return Response(400)  # incorrect request method
 
-        handler = self.methods.get(method)
-        if handler is not None:
-            return handler(request)
+        if hasattr(self, method.lower()):
+            return getattr(self, method.lower())(request)
+        elif method in self.default_methods:
+            return self.default_methods[method](request)
         else:
-            if method in self.default_methods:
-                return self.default_methods[method](request)
-            else:
-                return self.generic(request)
+            return self.generic(request)
+
+    def find_methods(self):
+        return tuple(m for m in Method.__args__ if hasattr(self, m.lower()))
 
     def fallback(self, request: Request) -> Response:
         return Response.create_from(self._fallback(request))
@@ -223,14 +221,14 @@ class Interface:
 
     def options_(self, request: Request) -> Response:
         """Default "OPTIONS" method implementation"""
-        resp = Response(header = {'Allow': ','.join(self.methods.keys())})
+        resp = Response(header = {'Allow': ','.join(self.find_methods())})
         if request.header.get('Origin'):
             resp.header.update({'Access-Control-Allow-Origin': request.header['Origin']})
         return resp
 
     def head_(self, request: Request) -> Response:
         """Default "HEAD" method implementation"""
-        if 'GET' not in self.methods and self.generic == Response(405):
+        if not hasattr(self, 'get') and self.generic == Response(405):
             return Response(405)
         request.method = 'GET'
         resp = Response.create_from(self.process(request))
@@ -249,12 +247,12 @@ class Interface:
         template = self.__class__.__name__ + '[{}]'
         if self.desc:
             return template.format(self.desc)
-        if not self.methods:
+        if not self.find_methods():
             return template.format(name(self.generic))
 
         method_map = []
-        for method, func in self.methods.items():
-            method_map.append(method.upper() + ':' + name(func))
+        for method in self.find_methods():
+            method_map.append(method.upper() + ':' + name(getattr(self, method.lower())))
         return template.format('|'.join(method_map))
 
 
