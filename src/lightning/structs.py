@@ -311,11 +311,7 @@ class Interface:
             return template.format(self.desc)
         if not self.find_methods():
             return template.format(name(self.generic))
-
-        method_map = []
-        for method in self.find_methods():
-            method_map.append(method.upper() + ':' + name(getattr(self, method.lower())))
-        return template.format('|'.join(method_map))
+        return template.format('|'.join(self.find_methods()))
 
 
 class Node(Interface):
