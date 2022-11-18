@@ -309,9 +309,12 @@ class Interface:
         template = self.__class__.__name__ + '[{}]'
         if self.desc:
             return template.format(self.desc)
-        if not self.find_methods():
+        elif self.find_methods():
+            names = [m + ('' if name(m) == m.lower() else ':' + name(getattr(self, m.lower())))
+                     for m in self.find_methods()]
+            return template.format('|'.join(names))
+        else:
             return template.format(name(self.generic))
-        return template.format('|'.join(self.find_methods()))
 
 
 class Node(Interface):
