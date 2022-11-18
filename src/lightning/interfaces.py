@@ -1,9 +1,10 @@
 import fnmatch
 import logging
+import os
 import pathlib
 from mimetypes import guess_type
-from os.path import getsize, basename
 from os import scandir, DirEntry
+from os.path import getsize, basename
 from ssl import SSLContext
 from typing import Callable, Optional, Iterable
 from urllib.parse import quote

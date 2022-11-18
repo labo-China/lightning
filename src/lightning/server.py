@@ -1,10 +1,8 @@
-import threading
-import socket
-from typing import Type
-from ssl import SSLContext
-
-import time
 import logging
+import socket
+import threading
+import time
+from ssl import SSLContext
 
 from . import utility, backend
 from .structs import Node

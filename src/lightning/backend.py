@@ -1,15 +1,12 @@
 import abc
 import logging
 import socket
-import threading
-import select
-import traceback
 import time
-
 from concurrent import futures
 from typing import Optional, Type
+
 from . import utility
-from .structs import Node, Request, Response
+from .structs import Node, Request
 
 _BACKEND_CLS = {}
 
@@ -255,7 +252,7 @@ class ProcessPoolBackend(BasePoolBackend):
         """Check whether the server is started as a child process"""
         tester = socket.socket(utility.get_socket_family(self.sock.getsockname()))
         try:
-            tester.bind(self.addr)
+            tester.bind(self.sock.getsockname())
         except OSError:
             logging.info(f'The server is a child process. Ignoring all operations...')
             return True

@@ -3,7 +3,6 @@ import logging
 import pathlib
 import socket
 import time
-import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Union, Callable, Generator
