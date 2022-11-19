@@ -1,4 +1,5 @@
 import abc
+import select
 import logging
 import socket
 import time
@@ -53,7 +54,7 @@ class ConnectionPool:
         timeout = timeout or self.timeout
         if self.table[conn] is None:  # permanent socket never expires
             return False
-        elif getattr(conn, '_closed') or conn not in self:  # closed socket is treated as expired
+        elif getattr(conn, '_closed'):  # closed socket is treated as expired
             return True
         elif (self.table[conn] - self.timeout + timeout) < time.time():  # normally expired
             return True
@@ -65,22 +66,22 @@ class ConnectionPool:
             if self.is_expired(conn):
                 self.remove(conn)
 
+    def _get(self):
+        for r in select.select(self.active_conn, [], [], 0.1):
+            for rconn in r:
+                if self.is_expired(rconn):
+                    self.remove(rconn)
+                elif self.table[rconn] is not None:
+                    self.active_conn.remove(rconn)
+                return rconn
+
     def get(self) -> Optional[socket.socket]:
-        while True:
-            if not self.active_conn:
-                time.sleep(0.05)
-                continue
-            for c in list(conn for conn in self.active_conn if getattr(conn, '_closed')):
-                self.active_conn.remove(c)
-            for rl in select.select(self.active_conn, [], [], 5):
-                for r in rl:
-                    if self.closed:
-                        return
-                    if self.table[r] is not None:
-                        self.active_conn.remove(r)
-                    if self.is_expired(r):
-                        self.table.pop(r)
-                    return r
+        while not self.closed:
+            for c in list(conn for conn in self.active_conn if self.is_expired(conn)):
+                self.remove(c)
+            conn = self._get()
+            if conn:
+                return conn
 
     def close(self):
         """Remove and close all connections in the pool"""
