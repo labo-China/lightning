@@ -21,19 +21,17 @@ def _register_backend(*name: str):
 
 
 class ConnectionPool:
-    def __init__(self, timeout: int = 75, max_conn: int = float('inf'),
-                 clean_threshold: int = None):
+    def __init__(self, timeout: int = 75, max_conn: int = float('inf'), clean_thresh: int = None):
         self.timeout = timeout
         self.max_conn = max_conn
-        if clean_threshold is None:
-            self.clean_threshold = int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
+        self.clean_thresh = clean_thresh or int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
 
         self.table: dict[socket.socket, float] = {}
         self.active_conn = set()
         self.closed = False
 
     def add(self, conn: socket.socket, forever: bool = False):
-        if len(self.table) > self.clean_threshold:
+        if len(self.table) > self.clean_thresh:
             logging.debug(f'connections count ({len(self.table)}) has reached threshold. performing cleaning')
             self.clean()
         if getattr(conn, '_closed'):
