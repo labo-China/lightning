@@ -69,11 +69,10 @@ class ConnectionPool:
     def _get(self):
         for r in select.select(self.active_conn, [], [], 0.1):
             for rconn in r:
-                if self.is_expired(rconn):
-                    self.remove(rconn)
-                elif self.table[rconn] is not None:
+                if self.table[rconn] is not None:
                     self.active_conn.remove(rconn)
-                return rconn
+                if not getattr(rconn, '_closed'):
+                    return rconn
 
     def get(self) -> Optional[socket.socket]:
         while not self.closed:
@@ -107,7 +106,7 @@ class BaseBackend(abc.ABC):
         self.is_running = True
         try:
             self.start(*args, **kwargs)
-        except (OSError, KeyboardInterrupt):
+        except KeyboardInterrupt:
             self.terminate()
 
     @abc.abstractmethod
@@ -125,7 +124,7 @@ class BaseBackend(abc.ABC):
         self.conn_pool.close()
         self.sock.close()
 
-    def get_active_conn(self):
+    def get_active_conn(self) -> Optional[tuple[socket.socket, bytes]]:
         """
         Accept incoming connections and return available connections\n
         This could take a long time.\n
@@ -135,7 +134,8 @@ class BaseBackend(abc.ABC):
             sock = self.conn_pool.get()
             if sock is None:
                 return  # because pool is closed
-            elif sock is self.sock:
+
+            if sock is self.sock:
                 new_conn, _ = sock.accept()
                 logging.debug(f'Accept new conn:{utility.format_socket(new_conn)}')
                 self.conn_pool.add(new_conn)
@@ -151,7 +151,7 @@ class BaseBackend(abc.ABC):
                 logging.debug(f'Get active conn:{utility.format_socket(sock)}')
                 return sock, buf
 
-    def get_request(self):
+    def get_request(self) -> Optional[Request]:
         result = self.get_active_conn()
         if result is None:
             return
@@ -159,6 +159,9 @@ class BaseBackend(abc.ABC):
 
     def process_request(self, request: Request):
         """Process a request"""
+        if request is None:
+            raise ValueError('Can not process Null request. The server may be shutted down.')
+
         resp = self.root_node.process(request)
         if getattr(request.conn, '_closed'):
             if resp is not None:
