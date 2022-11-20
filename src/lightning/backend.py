@@ -143,13 +143,11 @@ class BaseBackend(abc.ABC):
             if sock is None:
                 return  # because pool is closed
 
-            if sock is self.sock:
-                new_conn, _ = sock.accept()
-                logging.debug(f'Accept new conn:{utility.format_socket(new_conn)}')
-                self.conn_pool.add(new_conn)
+            try:
+                buf = sock.recv(4)
+            except ConnectionResetError:
                 continue
 
-            buf = sock.recv(4)
             if buf == b'':
                 logging.debug(f'Remove inactive conn:{utility.format_socket(sock)}')
                 self.conn_pool.remove(sock)  # remove inactive connections
@@ -212,7 +210,8 @@ class BaseBackend(abc.ABC):
         return Request(**utility.parse_req(content), conn = conn, addr = conn.getpeername())
 
     def __del__(self):
-        self.terminate()
+        if self.is_running:
+            self.terminate()
 
 
 @_register_backend('single')
