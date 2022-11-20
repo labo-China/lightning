@@ -41,23 +41,23 @@ class Server:
         :param dualstack: whether server use IPv6 dualstack if possible
         :param sock: a given socket
         """
-        self.runner = None
-        self.backend_cls = backend.get_backend_class(backend_flag)
-        self.connection_pool = backend.ConnectionPool(timeout = keep_alive_timeout)
-        self.root_node = Node(desc = 'root_node', **kwargs)
-        self.bind = self.root_node.bind  # create an alias
-
         self._sock = sock or create_server_conn(server_addr, max_listen, reuse_port, reuse_addr, dualstack, timeout)
         # not to use server_addr directly since server_addr could contain irregular address or port number
         self.addr = self._sock.getsockname()
+
+        self.runner = None
+        self.backend_cls = backend.get_backend_class(backend_flag)
+        self.connection_pool = backend.ConnectionPool(server_sock = self._sock, timeout = keep_alive_timeout)
+        self.root_node = Node(desc = 'root_node', **kwargs)
+        self.bind = self.root_node.bind  # create an alias
 
         if ssl_cert:
             ssl_context = SSLContext()
             ssl_context.load_cert_chain(ssl_cert)
             self._sock = ssl_context.wrap_socket(self._sock, server_side = True)
 
-        self.backend = self.backend_cls(sock = self._sock, root_node = self.root_node, conn_pool = self.connection_pool,
-                                        max_worker = max_worker)
+        self.backend = self.backend_cls(
+            root_node = self.root_node, conn_pool = self.connection_pool, max_worker = max_worker)
 
     def run(self, block: bool = True, quiet: bool = False):
         """

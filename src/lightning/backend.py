@@ -21,16 +21,18 @@ def _register_backend(*name: str):
 
 
 class ConnectionPool:
-    def __init__(self, timeout: int = 75, max_conn: int = float('inf'), clean_thresh: int = None):
+    def __init__(self, server_sock: socket.socket, timeout: int = 75,
+                 max_conn: int = float('inf'), clean_thresh: int = None):
+        self.server_sock = server_sock
         self.timeout = timeout
         self.max_conn = max_conn
         self.clean_thresh = clean_thresh or int((self.max_conn if self.max_conn != float('inf') else 100) * 0.8)
 
         self.table: dict[socket.socket, float] = {}
-        self.active_conn = set()
+        self.active_conn = {self.server_sock}
         self.closed = False
 
-    def add(self, conn: socket.socket, forever: bool = False):
+    def add(self, conn: socket.socket):
         if len(self.table) > self.clean_thresh:
             logging.debug(f'connections count ({len(self.table)}) has reached threshold. performing cleaning')
             self.clean()
@@ -38,7 +40,7 @@ class ConnectionPool:
             logging.warning(f'adding closed socket')
             return
         self.active_conn.add(conn)
-        self.table[conn] = time.time() + self.timeout if not forever else None
+        self.table[conn] = time.time() + self.timeout
         logging.debug(f'{utility.format_socket(conn)} has been added to connection pool')
 
     def remove(self, conn: socket.socket):
@@ -50,10 +52,10 @@ class ConnectionPool:
 
     def is_expired(self, conn: socket.socket, timeout: int = None):
         timeout = timeout or self.timeout
-        if self.table[conn] is None:  # permanent socket never expires
-            return False
-        elif getattr(conn, '_closed'):  # closed socket is treated as expired
+        if getattr(conn, '_closed'):  # closed socket is treated as expired
             return True
+        elif conn is self.server_sock:  # server socket never expires
+            return False
         elif (self.table[conn] - self.timeout + timeout) < time.time():  # normally expired
             return True
         return False
@@ -65,12 +67,20 @@ class ConnectionPool:
                 self.remove(conn)
 
     def _get(self):
+        # set a short timeout to refresh self.active_conn quickly
         for r in select.select(self.active_conn, [], [], 0.1):
             for rconn in r:
-                if self.table[rconn] is not None:
+                if getattr(rconn, '_closed'):
+                    continue
+
+                if rconn is self.server_sock:
+                    new_conn, _ = rconn.accept()
+                    logging.debug(f'Accept new conn:{utility.format_socket(new_conn)}')
+                    self.add(new_conn)
+                    continue
+                else:
                     self.active_conn.remove(rconn)
-                if not getattr(rconn, '_closed'):
-                    return rconn
+                return rconn
 
     def get(self) -> Optional[socket.socket]:
         while not self.closed:
@@ -83,8 +93,12 @@ class ConnectionPool:
     def close(self):
         """Remove and close all connections in the pool"""
         self.closed = True
+
+        self.active_conn.remove(self.server_sock)
+        self.server_sock.close()
         for conn in set(self.table.keys()):
             conn.close()
+
         self.active_conn.clear()
         self.table.clear()
 
@@ -93,11 +107,9 @@ class ConnectionPool:
 
 
 class BaseBackend(abc.ABC):
-    def __init__(self, sock: socket.socket, root_node: Node, conn_pool: ConnectionPool, *args, **kwargs):
-        self.sock = sock
+    def __init__(self, root_node: Node, conn_pool: ConnectionPool, *args, **kwargs):
         self.root_node = root_node
         self.conn_pool = conn_pool
-        self.conn_pool.add(sock, forever = True)
         self.is_running = False
 
     def run(self, *args, **kwargs):
@@ -120,7 +132,6 @@ class BaseBackend(abc.ABC):
         """Terminate the backend and close the main connection."""
         self.interrupt()
         self.conn_pool.close()
-        self.sock.close()
 
     def get_active_conn(self) -> Optional[tuple[socket.socket, bytes]]:
         """
@@ -252,9 +263,9 @@ class ProcessPoolBackend(BasePoolBackend):
 
     def _is_child_process(self):
         """Check whether the server is started as a child process"""
-        tester = socket.socket(utility.get_socket_family(self.sock.getsockname()))
+        tester = socket.socket(utility.get_socket_family(self.conn_pool.server_sock.getsockname()))
         try:
-            tester.bind(self.sock.getsockname())
+            tester.bind(self.conn_pool.server_sock.getsockname())
         except OSError:
             logging.info(f'The server is a child process. Ignoring all operations...')
             return True
