@@ -280,7 +280,9 @@ class ProcessPoolBackend(BasePoolBackend):
 
 def get_backend_class(name: str) -> Type[BaseBackend]:
     if name in _BACKEND_CLS:
-        return _BACKEND_CLS[name]
+        backend = _BACKEND_CLS[name]
+        logging.info(f'Using {backend.__name__} for "{name}"')
+        return backend
     else:
         raise ValueError(f'"{name}" is not a valid backend name.')
 
