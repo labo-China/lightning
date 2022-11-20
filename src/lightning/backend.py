@@ -62,7 +62,7 @@ class ConnectionPool:
 
     def clean(self):
         logging.debug(f'performing cleaning in connection pool: {set(utility.format_socket(c) for c in self.table)}')
-        for conn in self.table:
+        for conn in set(self.table.keys()):
             if self.is_expired(conn):
                 self.remove(conn)
 
@@ -84,8 +84,7 @@ class ConnectionPool:
 
     def get(self) -> Optional[socket.socket]:
         while not self.closed:
-            for c in list(conn for conn in self.active_conn if self.is_expired(conn)):
-                self.remove(c)
+            self.clean()
             conn = self._get()
             if conn:
                 return conn
@@ -94,8 +93,8 @@ class ConnectionPool:
         """Remove and close all connections in the pool"""
         self.closed = True
 
-        self.active_conn.remove(self.server_sock)
         self.server_sock.close()
+        self.active_conn.remove(self.server_sock)
         for conn in set(self.table.keys()):
             conn.close()
 
@@ -153,8 +152,7 @@ class BaseBackend(abc.ABC):
             buf = sock.recv(4)
             if buf == b'':
                 logging.debug(f'Remove inactive conn:{utility.format_socket(sock)}')
-                if sock in self.conn_pool:
-                    self.conn_pool.remove(sock)  # remove inactive connections
+                self.conn_pool.remove(sock)  # remove inactive connections
                 sock.close()
             else:
                 logging.debug(f'Get active conn:{utility.format_socket(sock)}')
